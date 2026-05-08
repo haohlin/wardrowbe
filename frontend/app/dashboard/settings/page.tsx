@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
-import { Loader2, Save, RotateCcw, Check, Plus, Trash2, ChevronUp, ChevronDown, Server, MapPin, Navigation, Ruler } from 'lucide-react';
+import { Loader2, Save, RotateCcw, Check, Plus, Trash2, ChevronUp, ChevronDown, Server, MapPin, Navigation, Ruler, Languages } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -22,6 +22,7 @@ import { useUserProfile, useUpdateUserProfile } from '@/lib/hooks/use-user';
 import { CLOTHING_COLORS, OCCASIONS, Preferences, StyleProfile, AIEndpoint } from '@/lib/types';
 import { toF, toCelsius } from '@/lib/temperature';
 import { toast } from 'sonner';
+import { useI18n } from '@/lib/i18n';
 
 const CM_TO_IN = 0.393701;
 const IN_TO_CM = 2.54;
@@ -169,6 +170,7 @@ export default function SettingsPage() {
   const resetPreferences = useResetPreferences();
   const testEndpoint = useTestAIEndpoint();
   const updateUserProfile = useUpdateUserProfile();
+  const { language, setLanguage, t } = useI18n();
 
   const [formData, setFormData] = useState<Partial<Preferences>>({});
   const [hasChanges, setHasChanges] = useState(false);
@@ -472,9 +474,9 @@ export default function SettingsPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
+          <h1 className="text-2xl font-bold tracking-tight">{t('settings.title')}</h1>
           <p className="text-sm text-muted-foreground">
-            Manage your preferences and account settings
+            {t('settings.description')}
           </p>
         </div>
         <div className="flex gap-2">
@@ -494,6 +496,40 @@ export default function SettingsPage() {
       </div>
 
       <div className="grid gap-6">
+        {/* Language Section */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Languages className="h-5 w-5" />
+              {t('settings.language.title')}
+            </CardTitle>
+            <CardDescription>{t('settings.language.description')}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <Label>{t('settings.language.current')}</Label>
+              <div className="flex rounded-md border p-1">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={language === 'en' ? 'default' : 'ghost'}
+                  onClick={() => setLanguage('en')}
+                >
+                  {t('language.english')}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={language === 'zh' ? 'default' : 'ghost'}
+                  onClick={() => setLanguage('zh')}
+                >
+                  {t('language.chinese')}
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Account Section */}
         <Card>
           <CardHeader>
@@ -938,17 +974,26 @@ export default function SettingsPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Server className="h-5 w-5" />
-              AI Endpoints
+              {t('settings.ai.title')}
             </CardTitle>
             <CardDescription>
-              Configure AI endpoints for image analysis. Endpoints are tried in order from top to bottom.
+              {t('settings.ai.description')}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {(formData.ai_endpoints || []).length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No custom endpoints configured. Using default server settings.
+            <div className="rounded-lg border border-green-600/30 bg-green-600/10 p-3 text-sm">
+              <p className="font-medium text-green-700 dark:text-green-300">
+                {t('settings.ai.defaultConfigured')}
               </p>
+              <p className="mt-1 text-muted-foreground">
+                {t('settings.ai.defaultDetails')}
+              </p>
+            </div>
+            {(formData.ai_endpoints || []).length === 0 ? (
+              <div className="space-y-1 text-sm text-muted-foreground">
+                <p>{t('settings.ai.noCustomEndpoints')}</p>
+                <p>{t('settings.ai.customEndpointHint')}</p>
+              </div>
             ) : (
               <div className="space-y-3">
                 {(formData.ai_endpoints || []).map((endpoint, index) => (
@@ -1024,16 +1069,16 @@ export default function SettingsPage() {
                       {/* Status badges and test button */}
                       <div className="flex items-center gap-2 flex-wrap">
                         <Badge variant={endpoint.enabled ? 'default' : 'secondary'} className="text-xs">
-                          {endpoint.enabled ? 'Active' : 'Disabled'}
+                          {endpoint.enabled ? t('settings.ai.active') : t('settings.ai.disabled')}
                         </Badge>
                         {endpointTests[index]?.status === 'connected' && (
                           <Badge variant="outline" className="text-xs text-green-600 border-green-600">
-                            Connected
+                            {t('settings.ai.connected')}
                           </Badge>
                         )}
                         {endpointTests[index]?.status === 'error' && (
                           <Badge variant="outline" className="text-xs text-red-600 border-red-600">
-                            Error
+                            {t('settings.ai.error')}
                           </Badge>
                         )}
                         <Button
@@ -1046,7 +1091,7 @@ export default function SettingsPage() {
                           {endpointTests[index]?.status === 'testing' ? (
                             <Loader2 className="h-3 w-3 animate-spin mr-1" />
                           ) : null}
-                          Test Connection
+                          {t('settings.ai.testConnection')}
                         </Button>
                       </div>
                     </div>
@@ -1054,17 +1099,17 @@ export default function SettingsPage() {
                     {endpointTests[index]?.status === 'connected' && endpointTests[index]?.models && (
                       <div className="text-xs space-y-1 p-2 bg-green-50 dark:bg-green-950 rounded overflow-hidden">
                         <p className="font-medium text-green-700 dark:text-green-300">
-                          {endpointTests[index].models?.length} models available
+                          {endpointTests[index].models?.length} {t('settings.ai.modelsAvailable')}
                         </p>
                         {endpointTests[index].visionModels && endpointTests[index].visionModels!.length > 0 && (
                           <p className="text-green-600 dark:text-green-400 truncate" title={endpointTests[index].visionModels?.join(', ')}>
-                            Vision: {endpointTests[index].visionModels?.slice(0, 3).join(', ')}
+                            {t('settings.ai.vision')}: {endpointTests[index].visionModels?.slice(0, 3).join(', ')}
                             {(endpointTests[index].visionModels?.length || 0) > 3 && '...'}
                           </p>
                         )}
                         {endpointTests[index].textModels && endpointTests[index].textModels!.length > 0 && (
                           <p className="text-green-600 dark:text-green-400 truncate" title={endpointTests[index].textModels?.join(', ')}>
-                            Text: {endpointTests[index].textModels?.slice(0, 3).join(', ')}
+                            {t('settings.ai.text')}: {endpointTests[index].textModels?.slice(0, 3).join(', ')}
                             {(endpointTests[index].textModels?.length || 0) > 3 && '...'}
                           </p>
                         )}
@@ -1077,7 +1122,7 @@ export default function SettingsPage() {
                     )}
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div className="space-y-1">
-                        <Label className="text-xs">Name</Label>
+                        <Label className="text-xs">{t('settings.ai.name')}</Label>
                         <Input
                           value={endpoint.name}
                           onChange={(e) => {
@@ -1090,7 +1135,7 @@ export default function SettingsPage() {
                         />
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-xs">URL</Label>
+                        <Label className="text-xs">{t('settings.ai.url')}</Label>
                         <Input
                           value={endpoint.url}
                           onChange={(e) => {
@@ -1098,12 +1143,12 @@ export default function SettingsPage() {
                             updated[index] = { ...updated[index], url: e.target.value };
                             updateField('ai_endpoints', updated);
                           }}
-                          placeholder="http://localhost:11434/v1"
+                          placeholder="https://inference-api.nvidia.com/v1"
                           className="h-8"
                         />
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-xs">Vision Model</Label>
+                        <Label className="text-xs">{t('settings.ai.visionModel')}</Label>
                         <Input
                           value={endpoint.vision_model}
                           onChange={(e) => {
@@ -1111,12 +1156,12 @@ export default function SettingsPage() {
                             updated[index] = { ...updated[index], vision_model: e.target.value };
                             updateField('ai_endpoints', updated);
                           }}
-                          placeholder="moondream"
+                          placeholder="openai/openai/gpt-5.5"
                           className="h-8"
                         />
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-xs">Text Model</Label>
+                        <Label className="text-xs">{t('settings.ai.textModel')}</Label>
                         <Input
                           value={endpoint.text_model}
                           onChange={(e) => {
@@ -1124,7 +1169,7 @@ export default function SettingsPage() {
                             updated[index] = { ...updated[index], text_model: e.target.value };
                             updateField('ai_endpoints', updated);
                           }}
-                          placeholder="phi3:mini"
+                          placeholder="openai/openai/gpt-5.5"
                           className="h-8"
                         />
                       </div>
@@ -1139,17 +1184,17 @@ export default function SettingsPage() {
                 className="flex-1"
                 onClick={() => {
                   const newEndpoint: AIEndpoint = {
-                    name: `Endpoint ${(formData.ai_endpoints || []).length + 1}`,
-                    url: 'http://localhost:11434/v1',
-                    vision_model: 'moondream',
-                    text_model: 'phi3:mini',
+                    name: `NVIDIA Inference Hub ${(formData.ai_endpoints || []).length + 1}`,
+                    url: 'https://inference-api.nvidia.com/v1',
+                    vision_model: 'openai/openai/gpt-5.5',
+                    text_model: 'openai/openai/gpt-5.5',
                     enabled: true,
                   };
                   updateField('ai_endpoints', [...(formData.ai_endpoints || []), newEndpoint]);
                 }}
               >
                 <Plus className="h-4 w-4 mr-2" />
-                Add Endpoint
+                {t('settings.ai.addEndpoint')}
               </Button>
               {hasChanges && (
                 <Button onClick={handleSave} disabled={updatePreferences.isPending}>
@@ -1158,7 +1203,7 @@ export default function SettingsPage() {
                   ) : (
                     <Save className="h-4 w-4 mr-2" />
                   )}
-                  Save
+                  {t('settings.ai.save')}
                 </Button>
               )}
             </div>

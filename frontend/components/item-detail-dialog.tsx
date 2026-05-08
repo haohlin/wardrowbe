@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import {
   Heart,
@@ -103,9 +103,14 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
   const addImage = useAddItemImage();
   const deleteImage = useDeleteItemImage();
   const setPrimary = useSetPrimaryImage();
+  const previousItemIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (item) {
+      const previousItemId = previousItemIdRef.current;
+      const isNewItem = previousItemId !== item.id;
+      previousItemIdRef.current = item.id;
+
       setEditForm({
         name: item.name || '',
         type: item.type,
@@ -116,10 +121,23 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
         favorite: item.favorite,
         wash_interval: item.wash_interval ?? undefined,
       });
-      setIsEditing(false);
-      setActiveImageIndex(0);
+      if (isNewItem) {
+        setIsEditing(false);
+        setActiveImageIndex(0);
+      }
     }
-  }, [item?.id]);
+  }, [
+    item?.id,
+    item?.updated_at,
+    item?.name,
+    item?.type,
+    item?.subtype,
+    item?.brand,
+    item?.primary_color,
+    item?.notes,
+    item?.favorite,
+    item?.wash_interval,
+  ]);
 
   if (!item) return null;
 

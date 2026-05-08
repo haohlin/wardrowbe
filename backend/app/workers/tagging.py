@@ -12,6 +12,32 @@ from app.workers.db import get_db_session
 logger = logging.getLogger(__name__)
 
 
+def _compact_label(parts: list[str | None]) -> str | None:
+    """Join non-empty label parts without duplicating adjacent words."""
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        value = (part or "").strip()
+        if not value:
+            continue
+        key = value.lower()
+        if key in seen:
+            continue
+        cleaned.append(value)
+        seen.add(key)
+    return " ".join(cleaned) or None
+
+
+def _suggest_item_name(tags: ClothingTags) -> str | None:
+    """Build a concise editable item name from AI tags."""
+    if tags.ai_name:
+        return tags.ai_name.strip()
+    garment = _compact_label([tags.subtype, tags.type if tags.type != "unknown" else None])
+    if not garment:
+        return None
+    return _compact_label([tags.brand, tags.pattern, garment])
+
+
 def tags_to_item_fields(tags: ClothingTags, raw_response: str | None = None) -> dict[str, Any]:
     """Convert ClothingTags to item database fields."""
     # Build the tags JSONB object for frontend display
@@ -34,6 +60,9 @@ def tags_to_item_fields(tags: ClothingTags, raw_response: str | None = None) -> 
     fields = {
         "type": tags.type,
         "subtype": tags.subtype,
+        "name": _suggest_item_name(tags),
+        "brand": tags.brand,
+        "notes": tags.description,
         "primary_color": tags.primary_color,
         "colors": tags.colors,
         "pattern": tags.pattern,

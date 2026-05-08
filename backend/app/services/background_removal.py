@@ -1,5 +1,6 @@
 import logging
 from abc import ABC, abstractmethod
+from collections import deque
 from io import BytesIO
 
 import httpx
@@ -59,6 +60,52 @@ class HttpProvider(BackgroundRemovalProvider):
         return Image.open(BytesIO(response.content)).convert("RGBA")
 
 
+class SimpleLocalProvider(BackgroundRemovalProvider):
+    """Dependency-free fallback for product photos on mostly plain backgrounds."""
+
+    def remove(self, image: Image.Image) -> Image.Image:
+        img = image.convert("RGBA")
+        width, height = img.size
+        rgb = img.convert("RGB")
+        pix = rgb.load()
+
+        corners = [
+            pix[0, 0],
+            pix[max(width - 1, 0), 0],
+            pix[0, max(height - 1, 0)],
+            pix[max(width - 1, 0), max(height - 1, 0)],
+        ]
+        bg = tuple(sorted(channel)[len(channel) // 2] for channel in zip(*corners))
+
+        def distance(color: tuple[int, int, int]) -> float:
+            return sum((int(color[i]) - int(bg[i])) ** 2 for i in range(3)) ** 0.5
+
+        alpha = Image.new("L", (width, height), 255)
+        alpha_pix = alpha.load()
+        queue: deque[tuple[int, int]] = deque()
+        seen: set[tuple[int, int]] = set()
+
+        for x in range(width):
+            queue.append((x, 0))
+            queue.append((x, height - 1))
+        for y in range(height):
+            queue.append((0, y))
+            queue.append((width - 1, y))
+
+        while queue:
+            x, y = queue.popleft()
+            if (x, y) in seen or x < 0 or y < 0 or x >= width or y >= height:
+                continue
+            seen.add((x, y))
+            if distance(pix[x, y]) > 45:
+                continue
+            alpha_pix[x, y] = 0
+            queue.extend(((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)))
+
+        img.putalpha(alpha)
+        return img
+
+
 _provider: BackgroundRemovalProvider | None = None
 
 
@@ -76,7 +123,11 @@ def get_provider() -> BackgroundRemovalProvider:
         if not settings.bg_removal_url:
             raise ValueError("BG_REMOVAL_URL is required when BG_REMOVAL_PROVIDER=http")
         _provider = HttpProvider(url=settings.bg_removal_url, api_key=settings.bg_removal_api_key)
+    elif provider_type == "local":
+        _provider = SimpleLocalProvider()
     else:
-        raise ValueError(f"Unknown BG_REMOVAL_PROVIDER: {provider_type}. Use 'rembg' or 'http'.")
+        raise ValueError(
+            f"Unknown BG_REMOVAL_PROVIDER: {provider_type}. Use 'rembg', 'http', or 'local'."
+        )
 
     return _provider

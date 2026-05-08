@@ -449,8 +449,9 @@ export function useReanalyzeItem() {
       }
       return api.post<{ job_id: string; status: string }>(`/items/${id}/analyze`);
     },
-    onSuccess: () => {
+    onSuccess: (_, id) => {
       queryClient.invalidateQueries({ queryKey: ['items'] });
+      queryClient.invalidateQueries({ queryKey: ['item', id] });
     },
   });
 }
@@ -467,6 +468,22 @@ export interface BulkUploadResponse {
   successful: number;
   failed: number;
   results: BulkUploadResult[];
+}
+
+export interface BulkCreateItemMetadata {
+  type?: string;
+  subtype?: string;
+  name?: string;
+  brand?: string;
+  notes?: string;
+  colors?: string[];
+  primary_color?: string;
+  favorite?: boolean;
+}
+
+export interface BulkCreateItemInput {
+  files: File[];
+  metadata?: BulkCreateItemMetadata[];
 }
 
 export interface BulkDeleteResponse {
@@ -623,13 +640,18 @@ export function useBulkCreateItems() {
   const [uploadProgress, setUploadProgress] = useState(0);
 
   const mutation = useMutation({
-    mutationFn: async (files: File[]) => {
+    mutationFn: async (input: File[] | BulkCreateItemInput) => {
       const token = session?.accessToken || getAccessToken();
+      const files = Array.isArray(input) ? input : input.files;
+      const metadata = Array.isArray(input) ? undefined : input.metadata;
 
       const formData = new FormData();
       files.forEach((file) => {
         formData.append('images', file);
       });
+      if (metadata) {
+        formData.append('metadata', JSON.stringify(metadata));
+      }
 
       // Use XMLHttpRequest for upload progress tracking
       return new Promise<BulkUploadResponse>((resolve, reject) => {

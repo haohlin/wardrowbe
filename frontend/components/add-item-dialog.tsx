@@ -42,11 +42,28 @@ interface AddItemDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
+interface BulkFileMetadata {
+  type: string;
+  name: string;
+  brand: string;
+  primaryColor: string;
+  notes: string;
+}
+
 interface FileWithPreview {
   file: File;
   preview: string;
   id: string;
+  metadata: BulkFileMetadata;
 }
+
+const emptyBulkFileMetadata = (): BulkFileMetadata => ({
+  type: '',
+  name: '',
+  brand: '',
+  primaryColor: '',
+  notes: '',
+});
 
 export function AddItemDialog({ open, onOpenChange }: AddItemDialogProps) {
   // Single upload state
@@ -100,6 +117,7 @@ export function AddItemDialog({ open, onOpenChange }: AddItemDialogProps) {
         file,
         preview,
         id: `${file.name}-${Date.now()}-${Math.random()}`,
+        metadata: emptyBulkFileMetadata(),
       };
     });
     setBulkFiles((prev) => {
@@ -153,7 +171,17 @@ export function AddItemDialog({ open, onOpenChange }: AddItemDialogProps) {
     if (bulkFiles.length === 0) return;
 
     try {
-      const result = await bulkCreateItems.mutateAsync(bulkFiles.map((f) => f.file));
+      const result = await bulkCreateItems.mutateAsync({
+        files: bulkFiles.map((f) => f.file),
+        metadata: bulkFiles.map((f) => ({
+          type: f.metadata.type || undefined,
+          name: f.metadata.name || undefined,
+          brand: f.metadata.brand || undefined,
+          primary_color: f.metadata.primaryColor || undefined,
+          notes: f.metadata.notes || undefined,
+          colors: f.metadata.primaryColor ? [f.metadata.primaryColor] : undefined,
+        })),
+      });
       setBulkResult(result);
 
       // Show toast based on results
@@ -219,6 +247,18 @@ export function AddItemDialog({ open, onOpenChange }: AddItemDialogProps) {
       }
       return prev.filter((f) => f.id !== id);
     });
+  };
+
+  const updateBulkFileMetadata = (
+    id: string,
+    field: keyof BulkFileMetadata,
+    value: string
+  ) => {
+    setBulkFiles((prev) =>
+      prev.map((f) =>
+        f.id === id ? { ...f, metadata: { ...f.metadata, [field]: value } } : f
+      )
+    );
   };
 
   const clearBulkFiles = () => {
@@ -401,9 +441,9 @@ export function AddItemDialog({ open, onOpenChange }: AddItemDialogProps) {
                       ? 'Drop the images here...'
                       : 'Drag & drop multiple images, or tap to select'}
                   </p>
-                  {/* <p className="mt-1 text-xs text-muted-foreground">
-                    Up to 20 images (JPEG, PNG, WebP, HEIC)
-                  </p> */}
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Up to 20 images (JPEG, PNG, WebP, or HEIC)
+                  </p>
                 </div>
 
                 {bulkFiles.length > 0 && (
@@ -423,34 +463,120 @@ export function AddItemDialog({ open, onOpenChange }: AddItemDialogProps) {
                       </Button>
                     </div>
 
-                    <ScrollArea className="h-[200px] rounded-md border p-2">
-                      <div className="grid grid-cols-4 gap-2">
-                        {bulkFiles.map((f) => (
-                          <div key={f.id} className="relative group">
-                            <img
-                              src={f.preview}
-                              alt={f.file.name}
-                              className="w-full aspect-square object-cover rounded-md"
-                            />
-                            <Button
-                              type="button"
-                              variant="destructive"
-                              size="icon"
-                              className="absolute top-1 right-1 h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity"
-                              onClick={() => removeBulkFile(f.id)}
-                            >
-                              <X className="h-3 w-3" />
-                            </Button>
-                            <p className="text-[10px] text-muted-foreground truncate mt-1 px-1">
-                              {f.file.name}
-                            </p>
+                    <ScrollArea className="h-[360px] rounded-md border p-3">
+                      <div className="space-y-4">
+                        {bulkFiles.map((f, index) => (
+                          <div key={f.id} className="rounded-lg border bg-card p-3 space-y-3">
+                            <div className="flex gap-3">
+                              <div className="relative shrink-0">
+                                <img
+                                  src={f.preview}
+                                  alt={f.file.name}
+                                  className="h-20 w-20 object-cover rounded-md"
+                                />
+                                <Button
+                                  type="button"
+                                  variant="destructive"
+                                  size="icon"
+                                  className="absolute -top-2 -right-2 h-6 w-6"
+                                  onClick={() => removeBulkFile(f.id)}
+                                >
+                                  <X className="h-3 w-3" />
+                                </Button>
+                              </div>
+                              <div className="min-w-0 flex-1 space-y-1">
+                                <p className="text-sm font-medium truncate">
+                                  Item {index + 1}: {f.file.name}
+                                </p>
+                                <p className="text-xs text-muted-foreground">Bulk item details</p>
+                                <div className="space-y-2">
+                                  <Label htmlFor={`bulk-type-${f.id}`} className="text-xs">
+                                    Type <span className="text-muted-foreground font-normal">(AI will detect if empty)</span>
+                                  </Label>
+                                  <Select
+                                    value={f.metadata.type}
+                                    onValueChange={(value) => updateBulkFileMetadata(f.id, 'type', value)}
+                                  >
+                                    <SelectTrigger id={`bulk-type-${f.id}`} className="h-8">
+                                      <SelectValue placeholder="Let AI detect..." />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {CLOTHING_TYPES.map((t) => (
+                                        <SelectItem key={t.value} value={t.value}>
+                                          {t.label}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label htmlFor={`bulk-name-${f.id}`} className="text-xs">Name (optional)</Label>
+                              <Input
+                                id={`bulk-name-${f.id}`}
+                                value={f.metadata.name}
+                                onChange={(e) => updateBulkFileMetadata(f.id, 'name', e.target.value)}
+                                placeholder="e.g., Blue Oxford Shirt"
+                                className="h-8"
+                              />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="space-y-2">
+                                <Label htmlFor={`bulk-brand-${f.id}`} className="text-xs">Brand</Label>
+                                <Input
+                                  id={`bulk-brand-${f.id}`}
+                                  value={f.metadata.brand}
+                                  onChange={(e) => updateBulkFileMetadata(f.id, 'brand', e.target.value)}
+                                  placeholder="e.g., J.Crew"
+                                  className="h-8"
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label htmlFor={`bulk-color-${f.id}`} className="text-xs">Primary Color</Label>
+                                <Select
+                                  value={f.metadata.primaryColor}
+                                  onValueChange={(value) => updateBulkFileMetadata(f.id, 'primaryColor', value)}
+                                >
+                                  <SelectTrigger id={`bulk-color-${f.id}`} className="h-8">
+                                    <SelectValue placeholder="Select..." />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {CLOTHING_COLORS.map((c) => (
+                                      <SelectItem key={c.value} value={c.value}>
+                                        <div className="flex items-center gap-2">
+                                          <div
+                                            className="w-3 h-3 rounded-full border"
+                                            style={{ backgroundColor: c.hex }}
+                                          />
+                                          {c.name}
+                                        </div>
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label htmlFor={`bulk-notes-${f.id}`} className="text-xs">Notes</Label>
+                              <Input
+                                id={`bulk-notes-${f.id}`}
+                                value={f.metadata.notes}
+                                onChange={(e) => updateBulkFileMetadata(f.id, 'notes', e.target.value)}
+                                placeholder="Any additional notes..."
+                                className="h-8"
+                              />
+                            </div>
                           </div>
                         ))}
                       </div>
                     </ScrollArea>
 
                     <p className="text-xs text-muted-foreground">
-                      All items will be auto-tagged by AI. You can edit details later.
+                      Fill any fields you know, or leave them empty and let AI detect them.
                     </p>
                   </div>
                 )}

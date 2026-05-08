@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from datetime import UTC, datetime
 from typing import Annotated
@@ -20,6 +21,7 @@ from app.schemas.item import (
     BulkDeleteResponse,
     BulkUploadResponse,
     BulkUploadResult,
+    ItemBulkMetadata,
     ItemCreate,
     ItemFilter,
     ItemImageResponse,
@@ -113,7 +115,7 @@ async def create_item(
     content = await image.read()
     content_type = image.content_type or "application/octet-stream"
 
-    if not image_service.validate_image(content, content_type):
+    if not image_service.validate_image(content, content_type, image.filename):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid image file. Supported formats: JPEG, PNG, WebP, HEIC",
@@ -194,6 +196,10 @@ async def bulk_create_items(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
     images: list[UploadFile] = File(..., description="Multiple image files to upload"),
+    metadata: str | None = Form(
+        None,
+        description="Optional JSON array aligned with images. Each entry may include type, name, brand, primary_color, notes, colors, favorite.",
+    ),
 ) -> BulkUploadResponse:
     if len(images) > 20:
         raise HTTPException(
@@ -206,6 +212,23 @@ async def bulk_create_items(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="At least one image is required",
         )
+
+    metadata_items: list[ItemBulkMetadata] = []
+    if metadata:
+        try:
+            raw_metadata = json.loads(metadata)
+            if not isinstance(raw_metadata, list):
+                raise ValueError("metadata must be a JSON array")
+            if len(raw_metadata) != len(images):
+                raise ValueError("metadata length must match number of images")
+            metadata_items = [ItemBulkMetadata.model_validate(entry or {}) for entry in raw_metadata]
+        except (json.JSONDecodeError, ValueError) as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid bulk metadata: {e}",
+            ) from None
+    else:
+        metadata_items = [ItemBulkMetadata() for _ in images]
 
     image_service = ImageService()
     item_service = ItemService(db)
@@ -221,15 +244,16 @@ async def bulk_create_items(
         logger.error(f"Failed to connect to Redis for bulk upload: {e}")
 
     try:
-        for upload_file in images:
+        for index, upload_file in enumerate(images):
             filename = upload_file.filename or "unknown.jpg"
+            item_metadata = metadata_items[index]
 
             try:
                 # Read and validate image
                 content = await upload_file.read()
                 content_type = upload_file.content_type or "application/octet-stream"
 
-                if not image_service.validate_image(content, content_type):
+                if not image_service.validate_image(content, content_type, upload_file.filename):
                     results.append(
                         BulkUploadResult(
                             filename=filename,
@@ -267,8 +291,17 @@ async def bulk_create_items(
                     original_filename=filename,
                 )
 
-                # Create item with unknown type (AI will detect)
-                item_data = ItemCreate(type="unknown")
+                # Create item with per-image metadata. Type remains optional: AI will detect if empty.
+                item_data = ItemCreate(
+                    type=item_metadata.type or "unknown",
+                    subtype=item_metadata.subtype,
+                    name=item_metadata.name,
+                    brand=item_metadata.brand,
+                    notes=item_metadata.notes,
+                    colors=item_metadata.colors,
+                    primary_color=item_metadata.primary_color,
+                    favorite=item_metadata.favorite,
+                )
                 item = await item_service.create(
                     user_id=current_user.id,
                     item_data=item_data,
@@ -952,7 +985,7 @@ async def add_item_image(
     content = await image.read()
     content_type = image.content_type or "application/octet-stream"
 
-    if not image_service_inst.validate_image(content, content_type):
+    if not image_service_inst.validate_image(content, content_type, image.filename):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid image file. Supported formats: JPEG, PNG, WebP, HEIC",

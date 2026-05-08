@@ -111,6 +111,53 @@ class RecommendationService:
 
         return items
 
+    async def get_candidate_item_diagnostics(
+        self,
+        user: User,
+        preferences: UserPreference | None,
+        exclude_items: list[UUID],
+    ) -> dict[str, int]:
+        result = await self.db.execute(
+            select(ClothingItem).where(
+                and_(
+                    ClothingItem.user_id == user.id,
+                    ClothingItem.status == ItemStatus.ready,
+                    ClothingItem.is_archived.is_(False),
+                )
+            )
+        )
+        ready_items = list(result.scalars().all())
+        explicit_excluded = set(exclude_items or [])
+        preference_excluded = set(preferences.excluded_item_ids or []) if preferences else set()
+
+        return {
+            "minimum_required": 2,
+            "ready": len(ready_items),
+            "needs_wash": sum(1 for item in ready_items if item.needs_wash),
+            "unknown_type": sum(1 for item in ready_items if not item.type or item.type == "unknown"),
+            "excluded_by_request": sum(1 for item in ready_items if item.id in explicit_excluded),
+            "excluded_by_preferences": sum(1 for item in ready_items if item.id in preference_excluded),
+        }
+
+    def _insufficient_wardrobe_message(self, usable_count: int, diagnostics: dict[str, int]) -> str:
+        reasons = []
+        if diagnostics.get("unknown_type"):
+            reasons.append(f"{diagnostics['unknown_type']} unknown type")
+        if diagnostics.get("needs_wash"):
+            reasons.append(f"{diagnostics['needs_wash']} need washing")
+        if diagnostics.get("excluded_by_request"):
+            reasons.append(f"{diagnostics['excluded_by_request']} excluded by current filters")
+        if diagnostics.get("excluded_by_preferences"):
+            reasons.append(f"{diagnostics['excluded_by_preferences']} excluded by preferences")
+
+        reason_text = f" Blocked items: {', '.join(reasons)}." if reasons else ""
+        return (
+            f"Need at least {diagnostics.get('minimum_required', 2)} usable items to generate a suggestion; "
+            f"found {usable_count} usable out of {diagnostics.get('ready', 0)} ready wardrobe items."
+            f"{reason_text} Usable items must be ready, not archived, not marked as needing wash, "
+            "have a known type, and not be excluded by filters/preferences."
+        )
+
     async def _get_recently_worn_dates(self, user: User) -> dict[UUID, date]:
         result = await self.db.execute(
             select(ClothingItem.id, ClothingItem.last_worn_at).where(
@@ -683,9 +730,13 @@ class RecommendationService:
                 logger.info(f"Force-included {len(forced_items)} items in recommendation")
 
         if len(candidates) < 2:
+            diagnostics = await self.get_candidate_item_diagnostics(
+                user=user,
+                preferences=preferences,
+                exclude_items=exclude_items,
+            )
             raise InsufficientWardrobeError(
-                "Not enough items in wardrobe for recommendation. "
-                "Please add more items or adjust filters."
+                self._insufficient_wardrobe_message(len(candidates), diagnostics)
             )
 
         # Check cache for pre-generated suggestions
