@@ -314,6 +314,7 @@ export interface SuggestRequest {
   occasion: string;
   mode?: 'existing' | 'generate';
   language?: 'en' | 'zh';
+  preference_note?: string;
   weather_override?: {
     temperature: number;
     feels_like?: number;

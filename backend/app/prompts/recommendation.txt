@@ -28,7 +28,9 @@ Proportion and silhouette:
 - If user body measurements are provided, consider proportions: taller frames carry volume better, broader builds benefit from structured pieces, and item sizes should be compatible with the user's measurements
 
 Layering (when weather calls for it):
-- Think in layers: base (shirt/tee), mid (sweater/cardigan/light jacket), outer (coat/heavy jacket)
+- Think in layers: base (shirt/tee), mid (sweater/cardigan/hoodie), outer (jacket/coat/shell/windbreaker)
+- Outerwear order: jackets, shells, windbreakers, parkas, and coats are always the outermost visible layer; never style a jacket or shell underneath a cardigan, sweater, or long rope knit
+- Cardigans and sweaters can sit over shirts/tees or under true outerwear, but they must not cover technical/outdoor shells
 - Each layer should be visible and contribute to the look, not just warmth
 - Layered outfits should work when the outer layer is removed too
 

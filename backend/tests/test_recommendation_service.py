@@ -99,6 +99,8 @@ class TestPromptTemplate:
         assert "Time of day" in prompt
         assert "Full day" in prompt
         assert "{time_of_day}" in prompt
+        assert "Outerwear order" in prompt
+        assert "never style a jacket or shell underneath a cardigan" in prompt
 
     def test_prompt_format_accepts_time_of_day(self):
         from app.services.recommendation_service import RECOMMENDATION_PROMPT
@@ -155,6 +157,7 @@ class TestSuggestRequestTimeOfDay:
             json={
                 "occasion": "casual",
                 "time_of_day": "evening",
+                "preference_note": "Keep the outfit clean and avoid bulky layering.",
                 "weather_override": {
                     "temperature": 20,
                     "condition": "clear",
@@ -349,9 +352,10 @@ class TestSuggestionLanguageAndTryOn:
         instruction = service._language_instruction("en")
         assert "English" in instruction
 
-    def test_try_on_prompt_uses_body_measurements_and_front_back(self):
+    def test_try_on_prompt_uses_gender_body_measurements_and_front_back(self):
         service = RecommendationService.__new__(RecommendationService)
         user = _make_user()
+        user.gender = "male"
         user.body_measurements = {"height": 180, "weight": 75, "chest": 96, "waist": 82, "inseam": 78}
         item = _make_item(name="Black Slim Trousers", type="pants", primary_color="black")
 
@@ -364,10 +368,43 @@ class TestSuggestionLanguageAndTryOn:
         )
 
         assert "front and back" in prompt
+        assert "male" in prompt
         assert "180cm" in prompt
         assert "82cm" in prompt
         assert "Black Slim Trousers" in prompt
         assert "Chinese" in prompt
+
+    def test_try_on_prompt_orders_shell_outside_cardigan(self):
+        service = RecommendationService.__new__(RecommendationService)
+        user = _make_user()
+        shell = _make_item(name="Tan Soft Shell Outdoor Jacket", type="jacket", subtype="soft shell", primary_color="tan")
+        cardigan = _make_item(name="Long Rope Cardigan", type="cardigan", primary_color="cream")
+
+        prompt = service._build_try_on_prompt(
+            user=user,
+            items=[shell, cardigan],
+            outfit_data={"headline": "Layer Test"},
+            occasion="outdoor",
+            language="en",
+        )
+
+        assert "outermost" in prompt
+        assert "never place a jacket or shell underneath a cardigan" in prompt
+        assert "Tan Soft Shell Outdoor Jacket" in prompt
+        assert "Long Rope Cardigan" in prompt
+
+    def test_format_preferences_includes_user_request(self):
+        service = RecommendationService.__new__(RecommendationService)
+        text = service._format_preferences_for_prompt(
+            None,
+            None,
+            None,
+            None,
+            occasion="casual",
+            user_request="No outdoor shell under long cardigan; make it cleaner.",
+        )
+        assert "CURRENT USER REQUEST" in text
+        assert "No outdoor shell" in text
 
 
 class TestExistingOutfitSuggestion:

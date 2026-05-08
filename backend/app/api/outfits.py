@@ -94,6 +94,11 @@ class SuggestRequest(BaseModel):
     mode: Literal["existing", "generate"] = Field(default="generate", description="Select an existing outfit or generate a new AI outfit")
     occasion: str | None = None
     language: Literal["en", "zh"] = "en"
+    preference_note: str | None = Field(
+        None,
+        max_length=500,
+        description="Free-text preference or refinement instruction for this suggestion",
+    )
 
     @field_validator("occasion")
     @classmethod
@@ -207,6 +212,11 @@ class ExistingOutfitSuggestionRequest(BaseModel):
     occasion: str | None = None
     time_of_day: Literal["morning", "afternoon", "evening", "night", "full day"] | None = None
     weather_override: WeatherOverrideRequest | None = None
+    preference_note: str | None = Field(
+        None,
+        max_length=500,
+        description="Free-text preference or refinement instruction for this suggestion",
+    )
 
 
 class OutfitListResponse(BaseModel):
@@ -440,6 +450,7 @@ async def suggest_outfit(
             include_items=request.include_items,
             time_of_day=request.time_of_day,
             language=request.language,
+            user_request=request.preference_note,
         )
     except InsufficientWardrobeError as e:
         raise HTTPException(
@@ -505,6 +516,7 @@ async def suggest_existing_outfit(
             occasion=occasion,
             weather_override=weather_override,
             time_of_day=request.time_of_day,
+            user_request=request.preference_note,
         )
     except ValueError as e:
         raise HTTPException(

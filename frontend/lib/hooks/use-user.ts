@@ -4,6 +4,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSession } from 'next-auth/react';
 import { api, setAccessToken } from '@/lib/api';
 
+export type Gender = 'female' | 'male' | 'non_binary' | 'prefer_not_to_say';
+
 export interface UserProfile {
   id: string;
   email: string;
@@ -17,6 +19,7 @@ export interface UserProfile {
   role: string;
   onboarding_completed: boolean;
   body_measurements?: Record<string, number | string> | null;
+  gender?: Gender | null;
 }
 
 export interface UserProfileUpdate {
@@ -26,6 +29,7 @@ export interface UserProfileUpdate {
   location_lon?: number;
   location_name?: string;
   body_measurements?: Record<string, number | string> | null;
+  gender?: Gender | null;
 }
 
 function useSetTokenIfAvailable() {

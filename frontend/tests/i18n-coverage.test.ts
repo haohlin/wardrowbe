@@ -59,6 +59,12 @@ describe('Chinese interface coverage', () => {
       'My Looks',
       'Recommendation Settings',
       'Get personalized outfit suggestions based on weather and occasion',
+      'Gender Identity',
+      'Used for fit-aware outfit suggestions and realistic model try-on images.',
+      'Preference for this suggestion',
+      'Adjust this suggestion',
+      'Tweak Suggestion',
+      'Generate new outfit with AI',
     ]
 
     for (const phrase of requiredPhrases) {

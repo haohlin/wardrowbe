@@ -310,8 +310,17 @@ class RecommendationService:
         number_map: dict[int, UUID] | None = None,
         occasion: str | None = None,
         body_measurements: dict | None = None,
+        gender: str | None = None,
+        user_request: str | None = None,
     ) -> str:
         lines = []
+
+        if user_request and user_request.strip():
+            lines.append(f"- CURRENT USER REQUEST: {user_request.strip()}")
+
+        if gender:
+            display_gender = gender.replace("_", " ")
+            lines.append(f"- Gender identity for fit and styling context: {display_gender}")
 
         if body_measurements:
             m = body_measurements
@@ -493,10 +502,13 @@ class RecommendationService:
 
     def _body_measurements_summary(self, user: User) -> str:
         measurements = getattr(user, "body_measurements", None) or {}
-        if not measurements:
-            return "No saved body measurements; use an average adult model silhouette."
-
+        gender = getattr(user, "gender", None)
         parts = []
+        if gender:
+            parts.append(f"gender identity {gender.replace('_', ' ')}")
+        if not measurements:
+            return ", ".join(parts) if parts else "No saved body measurements; use an average adult model silhouette."
+
         units = {
             "height": "cm",
             "weight": "kg",
@@ -540,6 +552,8 @@ class RecommendationService:
             "Create one realistic fashion try-on image for this suggested outfit. "
             "Show the same anonymous adult model wearing all listed wardrobe items. "
             "The final picture must include TWO full-body views side by side: front and back views (front view and back view). "
+            "Layer garments in a physically plausible order: shells, windbreakers, outdoor jackets, parkas, and coats are outermost; "
+            "never place a jacket or shell underneath a cardigan, sweater, or long rope knit. "
             "Use a neutral studio background, realistic fabric, natural proportions, and preserve the garments' "
             "colors, textures, shapes, and visible details from the reference photos. Do not add extra clothing.\n\n"
             f"User body measurements for model proportions: {self._body_measurements_summary(user)}.\n"
@@ -843,6 +857,7 @@ class RecommendationService:
         occasion: str,
         weather_override: WeatherData | None = None,
         time_of_day: str | None = None,
+        user_request: str | None = None,
     ) -> Outfit:
         weather = await self._get_weather_for_context(user, weather_override)
         if not time_of_day:
@@ -905,6 +920,8 @@ class RecommendationService:
         selected.style_notes = (
             f"Chosen from your existing outfits because it best matches the current scenario, weather, and {time_of_day} timing."
         )
+        if user_request and user_request.strip():
+            selected.style_notes += f" Preference considered: {user_request.strip()}"
         raw = dict(selected.ai_raw_response or {})
         raw.setdefault("highlights", [
             f"Matches the {occasion} scenario.",
@@ -938,15 +955,18 @@ class RecommendationService:
         single_outfit: bool = False,
         scheduled_date: date | None = None,
         language: str | None = "en",
+        user_request: str | None = None,
     ) -> Outfit:
         exclude_items = exclude_items or []
         include_items = include_items or []
+        user_request = user_request.strip() if user_request and user_request.strip() else None
 
         if not time_of_day:
             time_of_day = get_time_of_day(user)
 
-        # Determine cache eligibility before auto-merge
-        use_cache = not exclude_items and not include_items and not single_outfit
+        # Determine cache eligibility before auto-merge. Free-text preference/refinement
+        # requests must not reuse or populate the generic suggestion cache.
+        use_cache = not exclude_items and not include_items and not single_outfit and not user_request
 
         # Auto-exclude today's rejected items for this occasion
         rejected_ids = await self._get_today_rejected_item_ids(user, occasion)
@@ -1069,6 +1089,8 @@ class RecommendationService:
             number_map,
             occasion=occasion,
             body_measurements=getattr(user, "body_measurements", None),
+            gender=getattr(user, "gender", None),
+            user_request=user_request,
         )
 
         prompt = RECOMMENDATION_PROMPT.format(
@@ -1140,8 +1162,8 @@ class RecommendationService:
                 language=language,
             )
 
-            # Cache remaining outfits for "Try Another"
-            if len(outfit_list) > 1:
+            # Cache remaining outfits for "Try Another" only for generic suggestions.
+            if use_cache and len(outfit_list) > 1:
                 serializable_map = {str(k): str(v) for k, v in number_map.items()}
                 to_cache = []
                 for od in outfit_list[1:]:

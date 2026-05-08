@@ -60,6 +60,32 @@ class TestUserUpdate:
         assert float(data["location_lat"]) == pytest.approx(40.7128, rel=1e-4)
         assert float(data["location_lon"]) == pytest.approx(-74.0060, rel=1e-4)
 
+    @pytest.mark.asyncio
+    async def test_update_user_gender(self, client: AsyncClient, test_user, auth_headers):
+        """Test updating gender for fit and try-on suggestions."""
+        response = await client.patch(
+            "/api/v1/users/me",
+            json={"gender": "female"},
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["gender"] == "female"
+
+        get_response = await client.get("/api/v1/users/me", headers=auth_headers)
+        assert get_response.status_code == 200
+        assert get_response.json()["gender"] == "female"
+
+    @pytest.mark.asyncio
+    async def test_update_user_gender_rejects_unknown_value(self, client: AsyncClient, test_user, auth_headers):
+        """Gender must be one of the supported profile options."""
+        response = await client.patch(
+            "/api/v1/users/me",
+            json={"gender": "robot"},
+            headers=auth_headers,
+        )
+        assert response.status_code == 422
+
 
 class TestOnboarding:
     """Tests for onboarding completion endpoint."""
