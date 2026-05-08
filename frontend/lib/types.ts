@@ -295,6 +295,7 @@ export interface Outfit {
   scheduled_for: string;
   status: 'pending' | 'sent' | 'viewed' | 'accepted' | 'rejected' | 'expired';
   source: OutfitSource;
+  name?: string | null;
   reasoning?: string;
   style_notes?: string;
   highlights?: string[];
@@ -311,6 +312,7 @@ export interface Outfit {
 
 export interface SuggestRequest {
   occasion: string;
+  mode?: 'existing' | 'generate';
   language?: 'en' | 'zh';
   weather_override?: {
     temperature: number;

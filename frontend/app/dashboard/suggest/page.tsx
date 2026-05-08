@@ -30,6 +30,7 @@ import {
   Snowflake,
   CalendarDays,
   CloudLightning,
+  ListChecks,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -433,7 +434,7 @@ function OutfitResult({
 
       {/* Action buttons */}
       <div className="flex gap-3 justify-center">
-        <Button variant="outline" size="lg" onClick={onTryAnother} className="gap-2">
+        <Button variant="outline" size="lg" onClick={() => onTryAnother()} className="gap-2">
           <RefreshCw className="h-4 w-4" />
           Try Another
         </Button>
@@ -458,6 +459,7 @@ export default function SuggestPage() {
   const [selectedOccasion, setSelectedOccasion] = useState<string | null>(null);
   const [occasionInitialized, setOccasionInitialized] = useState(false);
   const [weatherOverride, setWeatherOverride] = useState<WeatherOverride | null>(null);
+  const [suggestMode, setSuggestMode] = useState<'existing' | 'generate' | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [outfit, setOutfit] = useState<Outfit | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -469,8 +471,9 @@ export default function SuggestPage() {
     }
   }, [prefs, occasionInitialized, selectedOccasion]);
 
-  const handleGenerate = async () => {
+  const handleGenerate = async (modeOverride?: 'existing' | 'generate') => {
     if (!selectedOccasion) return;
+    const mode = modeOverride || suggestMode || 'generate';
 
     if (session?.accessToken) {
       setAccessToken(session.accessToken as string);
@@ -482,6 +485,7 @@ export default function SuggestPage() {
     try {
       const request: SuggestRequest = {
         occasion: selectedOccasion,
+        mode,
         language,
       };
 
@@ -495,7 +499,8 @@ export default function SuggestPage() {
         };
       }
 
-      const result = await api.post<Outfit>('/outfits/suggest', request);
+      const endpoint = mode === 'existing' ? '/outfits/suggest-existing' : '/outfits/suggest';
+      const result = await api.post<Outfit>(endpoint, request);
       setOutfit(result);
     } catch (err) {
       if (err instanceof ApiError) {
@@ -550,6 +555,7 @@ export default function SuggestPage() {
   const handleNewRequest = () => {
     setOutfit(null);
     setSelectedOccasion(null);
+    setSuggestMode(null);
     setError(null);
   };
 
@@ -594,23 +600,68 @@ export default function SuggestPage() {
                 temperatureUnit={temperatureUnit}
               />
 
+              {/* Suggestion mode */}
+              <div className="space-y-3">
+                <h2 className="font-semibold">How should I suggest?</h2>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => setSuggestMode('existing')}
+                    data-selected={suggestMode === 'existing'}
+                    className={cn(
+                      'rounded-xl border-2 p-4 text-left transition-all',
+                      suggestMode === 'existing'
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-muted bg-background hover:border-primary/50'
+                    )}
+                  >
+                    <div className="flex items-center gap-2 font-medium">
+                      <ListChecks className="h-5 w-5" />
+                      Select existing outfit
+                    </div>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      Pick from saved/outfit-history looks that fit the current scenario and weather.
+                    </p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSuggestMode('generate')}
+                    data-selected={suggestMode === 'generate'}
+                    className={cn(
+                      'rounded-xl border-2 p-4 text-left transition-all',
+                      suggestMode === 'generate'
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-muted bg-background hover:border-primary/50'
+                    )}
+                  >
+                    <div className="flex items-center gap-2 font-medium">
+                      <Sparkles className="h-5 w-5" />
+                      Generate new outfit with AI
+                    </div>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      Create a fresh wardrobe combination and AI try-on image.
+                    </p>
+                  </button>
+                </div>
+              </div>
+
               {/* Generate button */}
               <div className="pt-2">
                 <Button
                   size="lg"
                   className="w-full gap-2"
-                  onClick={handleGenerate}
-                  disabled={!selectedOccasion || isGenerating}
+                  onClick={() => handleGenerate()}
+                  disabled={!selectedOccasion || !suggestMode || isGenerating}
                 >
                   {isGenerating ? (
                     <>
                       <Loader2 className="h-5 w-5 animate-spin" />
-                      Creating your look...
+                      {suggestMode === 'existing' ? 'Finding your best saved look...' : 'Creating your look...'}
                     </>
                   ) : (
                     <>
                       <Sparkles className="h-5 w-5" />
-                      Get Suggestion
+                      {suggestMode === 'existing' ? 'Find Existing Outfit' : 'Generate AI Outfit'}
                     </>
                   )}
                 </Button>

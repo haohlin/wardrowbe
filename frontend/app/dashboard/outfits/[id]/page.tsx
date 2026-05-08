@@ -112,6 +112,50 @@ export default function OutfitDetailPage() {
 
       <LineageCard outfit={outfit} />
 
+      {(outfit.reasoning || outfit.highlights?.length || outfit.style_notes || outfit.try_on_image_url) && (
+        <Card>
+          <CardContent className="p-4 space-y-4">
+            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+              Why this outfit
+            </h2>
+            {outfit.reasoning && (
+              <p className="text-base font-medium">{outfit.reasoning}</p>
+            )}
+            {outfit.highlights && outfit.highlights.length > 0 && (
+              <ul className="space-y-2 text-sm text-muted-foreground">
+                {outfit.highlights.map((highlight, index) => (
+                  <li key={index} className="flex gap-2">
+                    <span className="text-primary">•</span>
+                    <span>{highlight}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {outfit.style_notes && (
+              <div className="rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">
+                <span className="font-medium text-foreground">Tip:</span> {outfit.style_notes}
+              </div>
+            )}
+            {outfit.try_on_image_url && (
+              <div className="overflow-hidden rounded-xl border bg-muted/20">
+                <div className="relative w-full aspect-[4/3] sm:aspect-[16/9]">
+                  <Image
+                    src={outfit.try_on_image_url}
+                    alt={`AI try-on preview for ${title}`}
+                    fill
+                    className="object-contain"
+                    sizes="(max-width: 640px) 100vw, 896px"
+                  />
+                </div>
+                <p className="border-t px-4 py-2 text-xs text-muted-foreground">
+                  AI try-on preview with front and back views based on your saved body measurements.
+                </p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardContent className="p-4">
           <h2 className="text-sm font-semibold text-muted-foreground mb-3 uppercase tracking-wide">

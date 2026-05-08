@@ -17,6 +17,7 @@ from app.models.outfit import (
     FamilyOutfitRating,
     Outfit,
     OutfitItem,
+    OutfitSource,
     OutfitStatus,
     UserFeedback,
 )
@@ -90,6 +91,7 @@ class WeatherOverrideRequest(BaseModel):
 
 
 class SuggestRequest(BaseModel):
+    mode: Literal["existing", "generate"] = Field(default="generate", description="Select an existing outfit or generate a new AI outfit")
     occasion: str | None = None
     language: Literal["en", "zh"] = "en"
 
@@ -199,6 +201,12 @@ class OutfitResponse(BaseModel):
     try_on_image_path: str | None = None
     try_on_image_url: str | None = None
     created_at: datetime
+
+
+class ExistingOutfitSuggestionRequest(BaseModel):
+    occasion: str | None = None
+    time_of_day: Literal["morning", "afternoon", "evening", "night", "full day"] | None = None
+    weather_override: WeatherOverrideRequest | None = None
 
 
 class OutfitListResponse(BaseModel):
@@ -456,6 +464,57 @@ async def suggest_outfit(
 
     wore_instead_map = await fetch_wore_instead_items_map(db, [outfit], user_id=current_user.id)
     return outfit_to_response(outfit, wore_instead_map, is_starter_suggestion=is_starter)
+
+
+@router.post("/suggest-existing", response_model=OutfitResponse)
+async def suggest_existing_outfit(
+    request: ExistingOutfitSuggestionRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> OutfitResponse:
+    await rate_limit_by_user(str(current_user.id), "suggest_existing", max_requests=20, window_seconds=60)
+
+    occasion = request.occasion
+    if occasion is None:
+        if current_user.preferences and current_user.preferences.default_occasion:
+            occasion = current_user.preferences.default_occasion
+        else:
+            occasion = "casual"
+
+    weather_override = None
+    if request.weather_override:
+        w = request.weather_override
+        weather_override = WeatherData(
+            temperature=w.temperature,
+            feels_like=w.feels_like or w.temperature,
+            humidity=w.humidity,
+            precipitation_chance=w.precipitation_chance,
+            precipitation_mm=0,
+            wind_speed=0,
+            condition=w.condition,
+            condition_code=0,
+            is_day=True,
+            uv_index=0,
+            timestamp=datetime.utcnow(),
+        )
+
+    service = RecommendationService(db)
+    try:
+        outfit = await service.suggest_existing_outfit(
+            user=current_user,
+            occasion=occasion,
+            weather_override=weather_override,
+            time_of_day=request.time_of_day,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from None
+
+    return outfit_to_response(
+        outfit, await fetch_wore_instead_items_map(db, [outfit], user_id=current_user.id)
+    )
 
 
 @router.get("", response_model=OutfitListResponse)

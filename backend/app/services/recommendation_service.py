@@ -819,6 +819,113 @@ class RecommendationService:
         logger.info(f"Created outfit {outfit.id} with {len(valid_ids)} items")
         return outfit
 
+
+    async def _get_weather_for_context(
+        self, user: User, weather_override: WeatherData | None = None
+    ) -> WeatherData:
+        if weather_override:
+            return weather_override
+        if user.location_lat is None or user.location_lon is None:
+            raise ValueError("User location not set. Please set location in settings.")
+        try:
+            return await self.weather_service.get_current_weather(
+                float(user.location_lat), float(user.location_lon)
+            )
+        except WeatherServiceError as e:
+            logger.error(f"Weather service failed: {e}")
+            raise ValueError(
+                "Could not fetch weather data. Please try again or provide weather manually."
+            ) from e
+
+    async def suggest_existing_outfit(
+        self,
+        user: User,
+        occasion: str,
+        weather_override: WeatherData | None = None,
+        time_of_day: str | None = None,
+    ) -> Outfit:
+        weather = await self._get_weather_for_context(user, weather_override)
+        if not time_of_day:
+            time_of_day = get_time_of_day(user)
+
+        result = await self.db.execute(
+            select(Outfit)
+            .where(
+                and_(
+                    Outfit.user_id == user.id,
+                    Outfit.status != OutfitStatus.rejected,
+                )
+            )
+            .options(
+                selectinload(Outfit.items).selectinload(OutfitItem.item),
+                selectinload(Outfit.feedback),
+                selectinload(Outfit.family_ratings).selectinload(FamilyOutfitRating.user),
+            )
+            .order_by(Outfit.created_at.desc())
+            .limit(80)
+        )
+        outfits = list(result.scalars().unique().all())
+        if not outfits:
+            raise ValueError("No existing outfits found. Generate an AI outfit first or save looks to your lookbook.")
+
+        def score(outfit: Outfit) -> float:
+            score_value = 0.0
+            if outfit.occasion == occasion:
+                score_value += 40
+            elif occasion in {"casual", "weekend"} and outfit.occasion in {"casual", "outdoor", "travel"}:
+                score_value += 18
+            elif occasion in {"office", "work", "business-casual"} and outfit.occasion in {"office", "work", "smart-casual", "business-casual"}:
+                score_value += 18
+            if outfit.scheduled_for is None:
+                score_value += 12
+            if outfit.feedback and outfit.feedback.rating:
+                score_value += outfit.feedback.rating * 4
+            if outfit.status == OutfitStatus.accepted:
+                score_value += 8
+            weather_data = outfit.weather_data or {}
+            old_temp = weather_data.get("temperature")
+            if isinstance(old_temp, (int, float)):
+                score_value += max(0.0, 20.0 - abs(float(old_temp) - float(weather.temperature)))
+            condition = str(weather_data.get("condition", "")).lower()
+            if condition and condition in weather.condition.lower():
+                score_value += 8
+            item_count = len(outfit.items or [])
+            if item_count >= 2:
+                score_value += min(item_count, 5)
+            return score_value
+
+        selected = max(outfits, key=score)
+        selected.weather_data = weather.to_dict()
+        selected.scheduled_for = get_user_today(user)
+        selected.status = OutfitStatus.pending
+        selected.source = OutfitSource.on_demand
+        selected.reasoning = (
+            f"Best saved outfit for {occasion} in {round(weather.temperature)}°C {weather.condition} weather."
+        )
+        selected.style_notes = (
+            f"Chosen from your existing outfits because it best matches the current scenario, weather, and {time_of_day} timing."
+        )
+        raw = dict(selected.ai_raw_response or {})
+        raw.setdefault("highlights", [
+            f"Matches the {occasion} scenario.",
+            f"Weather fit: {round(weather.temperature)}°C and {weather.condition}.",
+            f"Good timing for {time_of_day}.",
+        ])
+        selected.ai_raw_response = raw
+        await self.db.commit()
+        await self.db.refresh(selected)
+
+        refreshed = await self.db.execute(
+            select(Outfit)
+            .where(Outfit.id == selected.id)
+            .options(
+                selectinload(Outfit.items).selectinload(OutfitItem.item),
+                selectinload(Outfit.feedback),
+                selectinload(Outfit.family_ratings).selectinload(FamilyOutfitRating.user),
+            )
+        )
+        return refreshed.scalar_one()
+
     async def generate_recommendation(
         self,
         user: User,
@@ -848,20 +955,7 @@ class RecommendationService:
             logger.info(f"Auto-excluding {len(rejected_ids)} rejected items for user {user.id}")
 
         # Get weather
-        if weather_override:
-            weather = weather_override
-        else:
-            if user.location_lat is None or user.location_lon is None:
-                raise ValueError("User location not set. Please set location in settings.")
-            try:
-                weather = await self.weather_service.get_current_weather(
-                    float(user.location_lat), float(user.location_lon)
-                )
-            except WeatherServiceError as e:
-                logger.error(f"Weather service failed: {e}")
-                raise ValueError(
-                    "Could not fetch weather data. Please try again or provide weather manually."
-                ) from e
+        weather = await self._get_weather_for_context(user, weather_override)
 
         preferences = user.preferences
 

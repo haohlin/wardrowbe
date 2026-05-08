@@ -63,6 +63,8 @@ export interface Outfit {
   family_rating_average: number | null;
   family_rating_count: number | null;
   is_starter_suggestion?: boolean;
+  try_on_image_path?: string | null;
+  try_on_image_url?: string | null;
   created_at: string;
 }
 

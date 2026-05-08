@@ -16,12 +16,13 @@ from app.utils.signed_urls import verify_signature
 router = APIRouter(prefix="/images", tags=["Images"])
 
 FILENAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+\.(jpg|jpeg|png|webp)$")
+PATH_PART_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
-@router.get("/{user_id}/{filename}")
+@router.get("/{user_id}/{file_path:path}")
 async def get_image(
     user_id: str,
-    filename: str,
+    file_path: str,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User | None, Depends(get_current_user_optional)] = None,
     expires: str | None = Query(None),
@@ -35,13 +36,21 @@ async def get_image(
             detail="Invalid user ID format",
         ) from e
 
-    if not FILENAME_PATTERN.match(filename):
+    parts = [part for part in file_path.split("/") if part]
+    if not parts or any(part in {".", ".."} for part in parts):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid path",
+        )
+    filename = parts[-1]
+    folders = parts[:-1]
+    if not FILENAME_PATTERN.match(filename) or any(not PATH_PART_PATTERN.match(part) for part in folders):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid filename format",
         )
 
-    path = f"{user_id}/{filename}"
+    path = f"{user_id}/{'/'.join(parts)}"
     can_access = False
 
     if expires and sig:

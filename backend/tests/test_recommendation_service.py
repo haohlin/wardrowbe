@@ -12,6 +12,7 @@ from app.services.recommendation_service import (
     RecommendationService,
     get_time_of_day,
 )
+from app.services.weather_service import WeatherData
 
 
 def _make_user(timezone: str = "UTC") -> User:
@@ -367,3 +368,73 @@ class TestSuggestionLanguageAndTryOn:
         assert "82cm" in prompt
         assert "Black Slim Trousers" in prompt
         assert "Chinese" in prompt
+
+
+class TestExistingOutfitSuggestion:
+    @pytest.mark.asyncio
+    async def test_suggest_existing_outfit_picks_best_weather_match(self, db_session):
+        user = _make_user()
+        user.location_lat = 31.2
+        user.location_lon = 121.5
+        db_session.add(user)
+        await db_session.flush()
+
+        shirt = ClothingItem(
+            user_id=user.id,
+            type="shirt",
+            image_path=f"test/{uuid4()}.jpg",
+            status=ItemStatus.ready,
+            primary_color="green",
+        )
+        pants = ClothingItem(
+            user_id=user.id,
+            type="pants",
+            image_path=f"test/{uuid4()}.jpg",
+            status=ItemStatus.ready,
+            primary_color="beige",
+        )
+        cold = Outfit(
+            user_id=user.id,
+            occasion="formal",
+            status=OutfitStatus.pending,
+            source=OutfitSource.on_demand,
+            weather_data={"temperature": 3, "condition": "snow"},
+        )
+        warm = Outfit(
+            user_id=user.id,
+            occasion="casual",
+            status=OutfitStatus.accepted,
+            source=OutfitSource.manual,
+            weather_data={"temperature": 20, "condition": "clear"},
+            ai_raw_response={"highlights": ["Original highlight"], "try_on_image_path": "user/outfit_tryons/look.png"},
+        )
+        db_session.add_all([shirt, pants, cold, warm])
+        await db_session.flush()
+        db_session.add_all([
+            OutfitItem(outfit_id=warm.id, item_id=shirt.id, position=0),
+            OutfitItem(outfit_id=warm.id, item_id=pants.id, position=1),
+        ])
+        await db_session.commit()
+
+        service = RecommendationService(db_session)
+        weather = WeatherData(
+            temperature=21,
+            feels_like=21,
+            humidity=50,
+            precipitation_chance=10,
+            precipitation_mm=0,
+            wind_speed=0,
+            condition="clear",
+            condition_code=0,
+            is_day=True,
+            uv_index=0,
+            timestamp=datetime.now(UTC),
+        )
+        selected = await service.suggest_existing_outfit(
+            user=user, occasion="casual", weather_override=weather, time_of_day="evening"
+        )
+
+        assert selected.id == warm.id
+        assert selected.reasoning and "Best saved outfit" in selected.reasoning
+        assert selected.style_notes and "current scenario" in selected.style_notes
+        assert selected.ai_raw_response["try_on_image_path"] == "user/outfit_tryons/look.png"
