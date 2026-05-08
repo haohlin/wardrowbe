@@ -334,3 +334,36 @@ class TestPromptPreRanking:
         from app.services.recommendation_service import RECOMMENDATION_PROMPT
 
         assert "pre-ranked" in RECOMMENDATION_PROMPT
+
+
+class TestSuggestionLanguageAndTryOn:
+    def test_language_instruction_requests_chinese_output(self):
+        service = RecommendationService.__new__(RecommendationService)
+        instruction = service._language_instruction("zh")
+        assert "Simplified Chinese" in instruction
+        assert "headline" in instruction
+
+    def test_language_instruction_defaults_to_english(self):
+        service = RecommendationService.__new__(RecommendationService)
+        instruction = service._language_instruction("en")
+        assert "English" in instruction
+
+    def test_try_on_prompt_uses_body_measurements_and_front_back(self):
+        service = RecommendationService.__new__(RecommendationService)
+        user = _make_user()
+        user.body_measurements = {"height": 180, "weight": 75, "chest": 96, "waist": 82, "inseam": 78}
+        item = _make_item(name="Black Slim Trousers", type="pants", primary_color="black")
+
+        prompt = service._build_try_on_prompt(
+            user=user,
+            items=[item],
+            outfit_data={"headline": "城市极简", "highlights": ["比例干净"]},
+            occasion="casual",
+            language="zh",
+        )
+
+        assert "front and back" in prompt
+        assert "180cm" in prompt
+        assert "82cm" in prompt
+        assert "Black Slim Trousers" in prompt
+        assert "Chinese" in prompt

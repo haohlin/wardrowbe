@@ -66,13 +66,33 @@ class TestSuggestionCache:
             assert result == {"items": [1, 2], "headline": "Test"}
 
     @pytest.mark.asyncio
-    async def test_clear_removes_all(self, user_id, mock_redis):
+    async def test_clear_removes_all_language_variants(self, user_id, mock_redis):
         redis, _ = mock_redis
 
         with patch("app.services.suggestion_cache.get_redis", AsyncMock(return_value=redis)):
             await clear_suggestions(user_id, "casual")
-            key = _cache_key(user_id, "casual")
-            redis.delete.assert_called_once_with(key)
+            redis.delete.assert_called_once_with(
+                _cache_key(user_id, "casual"),
+                _cache_key(user_id, "casual", "en"),
+                _cache_key(user_id, "casual", "zh"),
+            )
+
+    @pytest.mark.asyncio
+    async def test_language_specific_cache_keys(self, user_id, mock_redis):
+        redis, pipe = mock_redis
+
+        with patch("app.services.suggestion_cache.get_redis", AsyncMock(return_value=redis)):
+            await push_suggestions(user_id, "casual", [{"headline": "中文"}], language="zh")
+            await pop_suggestion(user_id, "casual", language="zh")
+            await has_cached(user_id, "casual", language="zh")
+            await clear_suggestions(user_id, "casual", language="zh")
+
+        zh_key = _cache_key(user_id, "casual", "zh")
+        pipe.rpush.assert_called_once()
+        assert pipe.rpush.call_args.args[0] == zh_key
+        redis.lpop.assert_called_once_with(zh_key)
+        redis.llen.assert_called_once_with(zh_key)
+        redis.delete.assert_called_once_with(zh_key)
 
     @pytest.mark.asyncio
     async def test_has_cached_true(self, user_id, mock_redis):

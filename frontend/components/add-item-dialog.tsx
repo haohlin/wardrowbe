@@ -273,7 +273,7 @@ export function AddItemDialog({ open, onOpenChange }: AddItemDialogProps) {
   return (
     <>
     <Dialog open={open} onOpenChange={handleCloseRequest}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg max-h-[90dvh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle>Add Items</DialogTitle>
           <DialogDescription>
@@ -281,14 +281,14 @@ export function AddItemDialog({ open, onOpenChange }: AddItemDialogProps) {
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="min-h-0 flex-1 overflow-hidden flex flex-col">
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="single">Single Item</TabsTrigger>
             <TabsTrigger value="bulk">Bulk Upload</TabsTrigger>
           </TabsList>
 
           {/* Single Item Upload */}
-          <TabsContent value="single" className="space-y-4">
+          <TabsContent value="single" className="min-h-0 overflow-y-auto space-y-4 pr-1">
             <form onSubmit={handleSingleSubmit} className="space-y-4">
               {!preview ? (
                 <div
@@ -423,7 +423,7 @@ export function AddItemDialog({ open, onOpenChange }: AddItemDialogProps) {
           </TabsContent>
 
           {/* Bulk Upload */}
-          <TabsContent value="bulk" className="space-y-4">
+          <TabsContent value="bulk" className="min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col space-y-4 pr-1">
             {!bulkResult ? (
               <>
                 <div
@@ -447,7 +447,7 @@ export function AddItemDialog({ open, onOpenChange }: AddItemDialogProps) {
                 </div>
 
                 {bulkFiles.length > 0 && (
-                  <div className="space-y-3">
+                  <div className="min-h-0 flex-1 overflow-hidden space-y-3">
                     <div className="flex items-center justify-between">
                       <p className="text-sm font-medium">
                         {bulkFiles.length} image{bulkFiles.length !== 1 ? 's' : ''} selected
@@ -463,7 +463,7 @@ export function AddItemDialog({ open, onOpenChange }: AddItemDialogProps) {
                       </Button>
                     </div>
 
-                    <ScrollArea className="h-[360px] rounded-md border p-3">
+                    <ScrollArea className="h-[min(42dvh,360px)] rounded-md border p-3">
                       <div className="space-y-4">
                         {bulkFiles.map((f, index) => (
                           <div key={f.id} className="rounded-lg border bg-card p-3 space-y-3">
@@ -594,26 +594,47 @@ export function AddItemDialog({ open, onOpenChange }: AddItemDialogProps) {
                   </div>
                 )}
 
-                <div className="flex justify-end gap-2 pt-2">
-                  <Button type="button" variant="outline" onClick={handleCloseRequest}>
-                    Cancel
-                  </Button>
-                  <Button
-                    onClick={handleBulkSubmit}
-                    disabled={bulkFiles.length === 0 || bulkCreateItems.isPending}
-                  >
-                    {bulkCreateItems.isPending ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Uploading...
-                      </>
-                    ) : (
-                      <>
-                        <Upload className="mr-2 h-4 w-4" />
-                        Upload {bulkFiles.length} Item{bulkFiles.length !== 1 ? 's' : ''}
-                      </>
+                <div
+                  data-testid="bulk-upload-actions"
+                  className="sticky bottom-0 z-10 -mx-1 mt-auto border-t bg-background/95 px-1 pt-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] backdrop-blur supports-[backdrop-filter]:bg-background/80"
+                >
+                  <div className="mb-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                    <span>
+                      {bulkFiles.length > 0
+                        ? `Ready to upload ${bulkFiles.length} selected image${bulkFiles.length !== 1 ? 's' : ''}`
+                        : 'Select images to enable upload'}
+                    </span>
+                    {bulkFiles.length > 0 && !bulkCreateItems.isPending && (
+                      <button
+                        type="button"
+                        className="font-medium text-primary underline-offset-4 hover:underline"
+                        onClick={handleBulkSubmit}
+                      >
+                        Upload selected images
+                      </button>
                     )}
-                  </Button>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button type="button" variant="outline" onClick={handleCloseRequest}>
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={handleBulkSubmit}
+                      disabled={bulkFiles.length === 0 || bulkCreateItems.isPending}
+                    >
+                      {bulkCreateItems.isPending ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Uploading...
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="mr-2 h-4 w-4" />
+                          Upload {bulkFiles.length} Item{bulkFiles.length !== 1 ? 's' : ''}
+                        </>
+                      )}
+                    </Button>
+                  </div>
                 </div>
               </>
             ) : (

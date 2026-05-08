@@ -7,6 +7,7 @@ from PIL import Image
 from app.services.background_removal import (
     BackgroundRemovalProvider,
     HttpProvider,
+    NvhubImageProvider,
     RembgProvider,
     get_provider,
 )
@@ -122,6 +123,44 @@ class TestHttpProvider:
         assert call_kwargs.kwargs["headers"]["Authorization"] == "Bearer my-key"
 
 
+class TestNvhubImageProvider:
+    def test_remove_posts_multimodal_payload_and_reads_returned_data_url(self):
+        provider = NvhubImageProvider(
+            base_url="https://inference-api.nvidia.com/v1/",
+            api_key="test-key",
+            model="gcp/google/gemini-3-pro-image-preview",
+        )
+        png_bytes = BytesIO()
+        _make_rgba_image().save(png_bytes, format="PNG")
+        import base64
+
+        data_url = "data:image/png;base64," + base64.b64encode(png_bytes.getvalue()).decode("utf-8")
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {"images": [{"image_url": {"url": data_url}}]}}]
+        }
+
+        with patch("app.services.background_removal.httpx.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.post.return_value = mock_response
+            mock_client_cls.return_value = mock_client
+
+            result = provider.remove(_make_rgb_image())
+
+        assert result.mode == "RGBA"
+        url = mock_client.post.call_args.args[0]
+        kwargs = mock_client.post.call_args.kwargs
+        assert url == "https://inference-api.nvidia.com/v1/chat/completions"
+        assert kwargs["headers"]["Authorization"] == "Bearer test-key"
+        assert kwargs["json"]["model"] == "gcp/google/gemini-3-pro-image-preview"
+        content = kwargs["json"]["messages"][0]["content"]
+        assert content[0]["type"] == "text"
+        assert content[1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+
+
 class TestGetProvider:
     def setup_method(self):
         import app.services.background_removal as mod
@@ -157,6 +196,20 @@ class TestGetProvider:
             pytest.raises(ValueError, match="BG_REMOVAL_URL is required"),
         ):
             get_provider()
+
+
+    def test_nvhub_provider(self):
+        settings = MagicMock()
+        settings.bg_removal_provider = "nvhub"
+        settings.ai_base_url = "https://inference-api.nvidia.com/v1"
+        settings.ai_api_key = "key123"
+        settings.bg_removal_model = "gcp/google/gemini-3-pro-image-preview"
+        with patch("app.services.background_removal.get_settings", return_value=settings):
+            provider = get_provider()
+        assert isinstance(provider, NvhubImageProvider)
+        assert provider.base_url == "https://inference-api.nvidia.com/v1"
+        assert provider.api_key == "key123"
+        assert provider.model == "gcp/google/gemini-3-pro-image-preview"
 
     def test_unknown_provider_raises(self):
         settings = MagicMock()

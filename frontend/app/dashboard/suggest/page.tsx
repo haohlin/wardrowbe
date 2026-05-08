@@ -47,6 +47,7 @@ import { useWeather, Weather } from '@/lib/hooks/use-weather';
 import { usePreferences } from '@/lib/hooks/use-preferences';
 import { cn } from '@/lib/utils';
 import { TempUnit, formatTemp, displayValue, toF, toCelsius } from '@/lib/temperature';
+import { useI18n } from '@/lib/i18n';
 
 // Map occasion values to icons and colors
 const OCCASION_CONFIG: Record<string, { icon: React.ReactNode; color: string }> = {
@@ -306,6 +307,8 @@ function OutfitResult({
   onTryAnother: () => void;
   onNewRequest: () => void;
 }) {
+  const { t } = useI18n();
+
   return (
     <div className="space-y-6">
       {/* Header with occasion and new request */}
@@ -365,6 +368,22 @@ function OutfitResult({
             </ul>
           )}
         </div>
+        {outfit.try_on_image_url && (
+          <div className="border-b bg-background">
+            <div className="relative w-full aspect-[4/3] sm:aspect-[16/9]">
+              <Image
+                src={outfit.try_on_image_url}
+                alt={t('Model wearing the suggested outfit, front and back views')}
+                fill
+                className="object-contain bg-muted/30"
+                sizes="(max-width: 640px) 100vw, 672px"
+              />
+            </div>
+            <p className="px-4 py-2 text-xs text-muted-foreground">
+              {t('AI try-on preview with front and back views based on your saved body measurements.')}
+            </p>
+          </div>
+        )}
         <CardContent className="p-4">
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {outfit.items.map((item) => (
@@ -434,6 +453,7 @@ export default function SuggestPage() {
   const { data: session } = useSession();
   const { data: weather, isLoading: weatherLoading } = useWeather();
   const { data: prefs } = usePreferences();
+  const { language } = useI18n();
   const temperatureUnit: TempUnit = prefs?.temperature_unit === 'fahrenheit' ? 'fahrenheit' : 'celsius';
   const [selectedOccasion, setSelectedOccasion] = useState<string | null>(null);
   const [occasionInitialized, setOccasionInitialized] = useState(false);
@@ -462,6 +482,7 @@ export default function SuggestPage() {
     try {
       const request: SuggestRequest = {
         occasion: selectedOccasion,
+        language,
       };
 
       if (weatherOverride) {

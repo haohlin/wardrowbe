@@ -4,7 +4,7 @@ from io import BytesIO
 from pathlib import Path
 
 import imagehash
-from PIL import Image
+from PIL import Image, ImageOps
 
 from app.config import get_settings
 
@@ -61,6 +61,10 @@ class ImageService:
 
         return Image.open(BytesIO(image_data))
 
+    def _normalize_orientation(self, image: Image.Image) -> Image.Image:
+        """Apply EXIF orientation once and strip the tag before saving derived JPEGs."""
+        return ImageOps.exif_transpose(image)
+
     def _resize_image(
         self,
         image: Image.Image,
@@ -112,6 +116,7 @@ class ImageService:
             image = self._convert_heic(image_data)
         else:
             image = Image.open(BytesIO(image_data))
+        image = self._normalize_orientation(image)
 
         # Generate base filename
         base_filename = self._generate_filename(".jpg")
@@ -214,6 +219,9 @@ class ImageService:
         else:
             image = Image.open(BytesIO(image_data))
 
+        # Compute perceptual hash on the same orientation users see after upload.
+        image = self._normalize_orientation(image)
+
         # Convert to RGB if needed for consistent hashing
         if image.mode != "RGB":
             image = image.convert("RGB")
@@ -271,7 +279,7 @@ class ImageService:
         if not original_full.exists():
             raise ValueError(f"Image not found: {image_path}")
 
-        image = Image.open(original_full).convert("RGB")
+        image = self._normalize_orientation(Image.open(original_full)).convert("RGB")
         provider = get_provider()
         try:
             result = provider.remove(image)

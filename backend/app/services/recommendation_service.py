@@ -1,6 +1,10 @@
+import base64
 import json
 import logging
+import mimetypes
+import httpx
 import re
+from pathlib import Path
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
@@ -22,6 +26,7 @@ from app.models.outfit import (
 )
 from app.models.preference import UserPreference
 from app.models.user import User
+from app.config import get_settings
 from app.services.ai_service import AIService
 from app.services.item_scorer import get_season, score_items
 from app.services.suggestion_cache import pop_suggestion, push_suggestions
@@ -472,6 +477,149 @@ class RecommendationService:
 
         return good_pairs
 
+    def _language_instruction(self, language: str | None) -> str:
+        if language == "zh":
+            return (
+                "\nLANGUAGE REQUIREMENT:\n"
+                "- Write headline, highlights, and styling_tip in natural Simplified Chinese.\n"
+                "- Keep JSON keys exactly in English.\n"
+                "- Do not mix English into user-facing suggestion text unless it is a brand or item name.\n"
+            )
+        return (
+            "\nLANGUAGE REQUIREMENT:\n"
+            "- Write headline, highlights, and styling_tip in natural English.\n"
+            "- Keep JSON keys exactly in English.\n"
+        )
+
+    def _body_measurements_summary(self, user: User) -> str:
+        measurements = getattr(user, "body_measurements", None) or {}
+        if not measurements:
+            return "No saved body measurements; use an average adult model silhouette."
+
+        parts = []
+        units = {
+            "height": "cm",
+            "weight": "kg",
+            "chest": "cm",
+            "waist": "cm",
+            "hips": "cm",
+            "inseam": "cm",
+        }
+        for key in ["height", "weight", "chest", "waist", "hips", "inseam"]:
+            if measurements.get(key):
+                parts.append(f"{key} {measurements[key]}{units[key]}")
+        for key in ["shirt_size", "pants_size", "shoe_size"]:
+            if measurements.get(key):
+                parts.append(f"{key.replace('_', ' ')} {measurements[key]}")
+        return ", ".join(parts) if parts else "No saved body measurements; use an average adult model silhouette."
+
+    def _build_try_on_prompt(
+        self,
+        user: User,
+        items: list[ClothingItem],
+        outfit_data: dict,
+        occasion: str,
+        language: str | None,
+    ) -> str:
+        item_lines = []
+        for item in items:
+            desc = ", ".join(
+                part
+                for part in [
+                    item.name,
+                    item.subtype or item.type,
+                    item.primary_color,
+                    item.material,
+                    item.brand,
+                ]
+                if part
+            )
+            item_lines.append(f"- {desc or item.type}")
+        language_name = "Chinese" if language == "zh" else "English"
+        return (
+            "Create one realistic fashion try-on image for this suggested outfit. "
+            "Show the same anonymous adult model wearing all listed wardrobe items. "
+            "The final picture must include TWO full-body views side by side: front and back views (front view and back view). "
+            "Use a neutral studio background, realistic fabric, natural proportions, and preserve the garments' "
+            "colors, textures, shapes, and visible details from the reference photos. Do not add extra clothing.\n\n"
+            f"User body measurements for model proportions: {self._body_measurements_summary(user)}.\n"
+            f"Occasion: {occasion}.\n"
+            f"Outfit title: {outfit_data.get('headline') or outfit_data.get('reasoning') or 'Suggested outfit'}.\n"
+            f"Items to combine:\n" + "\n".join(item_lines) + "\n\n"
+            f"If any small labels/captions appear, use {language_name}; otherwise return only the image."
+        )
+
+    def _image_part_for_prompt(self, path: Path) -> dict:
+        mime = mimetypes.guess_type(path.name)[0] or "image/jpeg"
+        image_b64 = base64.b64encode(path.read_bytes()).decode("utf-8")
+        return {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{image_b64}"}}
+
+    def _extract_image_bytes(self, message: dict) -> bytes:
+        images = message.get("images") or []
+        if not images:
+            raise RuntimeError(f"NVHub image model returned no image: {message}")
+        url = images[0].get("image_url", {}).get("url") or images[0].get("url")
+        if not url or not url.startswith("data:"):
+            raise RuntimeError("NVHub image model returned an unsupported image payload")
+        return base64.b64decode(url.split(",", 1)[1])
+
+    async def _generate_try_on_image(
+        self,
+        user: User,
+        outfit_data: dict,
+        items: list[ClothingItem],
+        occasion: str,
+        language: str | None,
+    ) -> str | None:
+        settings = get_settings()
+        if not settings.ai_api_key:
+            logger.warning("Skipping try-on image: AI_API_KEY is not configured")
+            return None
+
+        storage = Path(settings.storage_path)
+        references = []
+        for item in items[:8]:
+            rel = item.medium_path or item.image_path or item.thumbnail_path
+            if not rel:
+                continue
+            full = storage / rel
+            if full.exists():
+                references.append((item, full))
+
+        if not references:
+            logger.warning("Skipping try-on image: no local item reference images found")
+            return None
+
+        content = [{"type": "text", "text": self._build_try_on_prompt(user, items, outfit_data, occasion, language)}]
+        for index, (item, full) in enumerate(references, 1):
+            content.append({"type": "text", "text": f"Reference garment {index}: {item.name or item.type}. Preserve this garment's visual design."})
+            content.append(self._image_part_for_prompt(full))
+
+        model = settings.bg_removal_model or "gcp/google/gemini-3-pro-image-preview"
+        payload = {"model": model, "messages": [{"role": "user", "content": content}]}
+        headers = {"Authorization": f"Bearer {settings.ai_api_key}", "Content-Type": "application/json"}
+
+        async with httpx.AsyncClient(timeout=240, follow_redirects=True) as client:
+            response = await client.post(
+                f"{str(settings.ai_base_url).rstrip('/')}/chat/completions",
+                headers=headers,
+                json=payload,
+            )
+            response.raise_for_status()
+
+        data = response.json()
+        message = data["choices"][0]["message"]
+        image_bytes = self._extract_image_bytes(message)
+
+        out_dir = storage / str(user.id) / "outfit_tryons"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}_{outfit_data.get('headline', 'tryon')[:12].lower().replace(' ', '_')}.png"
+        # keep filename conservative for filesystem/signed URL path usage
+        filename = re.sub(r"[^a-z0-9_\-.]", "", filename) or "tryon.png"
+        out_path = out_dir / filename
+        out_path.write_bytes(image_bytes)
+        return f"{user.id}/outfit_tryons/{filename}"
+
     def _parse_ai_response(self, content: str) -> dict:
         def strip_comments(json_str: str) -> str:
             json_str = re.sub(r"//[^\n]*", "", json_str)
@@ -566,6 +714,7 @@ class RecommendationService:
         source: OutfitSource,
         number_map: dict[int, UUID],
         scheduled_date: date | None = None,
+        language: str | None = "en",
     ) -> Outfit:
         selected_numbers = outfit_data.get("items", [])
         valid_ids = []
@@ -597,6 +746,27 @@ class RecommendationService:
         )
         item_type_map = {row.id: (row.type or "").lower() for row in items_result}
         valid_ids = deduplicate_by_body_slot(valid_ids, item_type_map)
+
+        selected_items_result = await self.db.execute(
+            select(ClothingItem).where(ClothingItem.id.in_(valid_ids))
+        )
+        selected_items_by_id = {item.id: item for item in selected_items_result.scalars().all()}
+        selected_items = [selected_items_by_id[item_id] for item_id in valid_ids if item_id in selected_items_by_id]
+
+        if "try_on_image_path" not in outfit_data:
+            try:
+                try_on_path = await self._generate_try_on_image(
+                    user=user,
+                    outfit_data=outfit_data,
+                    items=selected_items,
+                    occasion=occasion,
+                    language=language,
+                )
+                if try_on_path:
+                    outfit_data["try_on_image_path"] = try_on_path
+                    outfit_data["_image_model"] = get_settings().bg_removal_model
+            except Exception as exc:
+                logger.warning("Try-on image generation failed; continuing without image: %s", exc)
 
         reasoning = outfit_data.get("headline") or outfit_data.get("reasoning")
         style_notes = outfit_data.get("styling_tip") or outfit_data.get("style_notes")
@@ -660,6 +830,7 @@ class RecommendationService:
         time_of_day: str | None = None,
         single_outfit: bool = False,
         scheduled_date: date | None = None,
+        language: str | None = "en",
     ) -> Outfit:
         exclude_items = exclude_items or []
         include_items = include_items or []
@@ -741,7 +912,7 @@ class RecommendationService:
 
         # Check cache for pre-generated suggestions
         if use_cache:
-            cached = await pop_suggestion(user.id, occasion)
+            cached = await pop_suggestion(user.id, occasion, language=language)
             if cached:
                 cached_number_map = cached.get("_number_map", {})
                 number_map = {int(k): UUID(v) for k, v in cached_number_map.items()}
@@ -764,6 +935,7 @@ class RecommendationService:
                         source,
                         number_map,
                         scheduled_date=scheduled_date,
+                        language=language,
                     )
 
         # Fetch scoring context
@@ -812,7 +984,7 @@ class RecommendationService:
             feels_like=weather.feels_like,
             condition=weather.condition,
             precipitation_chance=weather.precipitation_chance,
-            preferences_text=preferences_text,
+            preferences_text=preferences_text + self._language_instruction(language),
             items_text=items_text,
         )
 
@@ -853,6 +1025,7 @@ class RecommendationService:
                     source,
                     number_map,
                     scheduled_date=scheduled_date,
+                    language=language,
                 )
 
             # Multi-outfit parse
@@ -870,6 +1043,7 @@ class RecommendationService:
                 source,
                 number_map,
                 scheduled_date=scheduled_date,
+                language=language,
             )
 
             # Cache remaining outfits for "Try Another"
@@ -881,7 +1055,7 @@ class RecommendationService:
                     od["_ai_model"] = result.model
                     od["_ai_endpoint"] = result.endpoint
                     to_cache.append(od)
-                await push_suggestions(user.id, occasion, to_cache)
+                await push_suggestions(user.id, occasion, to_cache, language=language)
                 logger.info(f"Cached {len(to_cache)} additional suggestions for user {user.id}")
 
             return outfit

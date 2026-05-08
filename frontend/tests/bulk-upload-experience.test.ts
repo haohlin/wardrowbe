@@ -33,4 +33,11 @@ describe('bulk add experience', () => {
     expect(hookSource).toContain('BulkCreateItemInput')
     expect(hookSource).toContain("formData.append('metadata', JSON.stringify(metadata))")
   })
+
+  it('keeps the bulk upload submit action visible after files are selected', () => {
+    expect(dialogSource).toContain('bulk-upload-actions')
+    expect(dialogSource).toContain('sticky bottom-0')
+    expect(dialogSource).toContain('Upload selected images')
+    expect(dialogSource).toContain('Ready to upload')
+  })
 })

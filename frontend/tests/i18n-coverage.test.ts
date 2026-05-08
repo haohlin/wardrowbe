@@ -45,6 +45,20 @@ describe('Chinese interface coverage', () => {
       'Set Up Schedule',
       'Quick Actions',
       'Family Outfits',
+      'Upload selected images',
+      'Ready to upload',
+      'Fill any fields you know, or leave them empty and let AI detect them.',
+      'Most common colors in your wardrobe',
+      'Outfits Generated',
+      'No other members yet',
+      'Pending Invites',
+      'No recommendation history',
+      'Compute Now',
+      'Notification channel added',
+      'No items in your wardrobe yet. Add items first.',
+      'My Looks',
+      'Recommendation Settings',
+      'Get personalized outfit suggestions based on weather and occasion',
     ]
 
     for (const phrase of requiredPhrases) {

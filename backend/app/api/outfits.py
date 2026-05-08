@@ -91,6 +91,7 @@ class WeatherOverrideRequest(BaseModel):
 
 class SuggestRequest(BaseModel):
     occasion: str | None = None
+    language: Literal["en", "zh"] = "en"
 
     @field_validator("occasion")
     @classmethod
@@ -195,6 +196,8 @@ class OutfitResponse(BaseModel):
     family_rating_average: float | None = None
     family_rating_count: int | None = None
     is_starter_suggestion: bool = False
+    try_on_image_path: str | None = None
+    try_on_image_url: str | None = None
     created_at: datetime
 
 
@@ -329,10 +332,16 @@ def outfit_to_response(
         )
 
     highlights = None
+    try_on_image_path = None
+    try_on_image_url = None
     if outfit.ai_raw_response and isinstance(outfit.ai_raw_response, dict):
         raw_highlights = outfit.ai_raw_response.get("highlights")
         if raw_highlights and isinstance(raw_highlights, list):
             highlights = raw_highlights
+        raw_try_on_path = outfit.ai_raw_response.get("try_on_image_path")
+        if raw_try_on_path and isinstance(raw_try_on_path, str):
+            try_on_image_path = raw_try_on_path
+            try_on_image_url = sign_image_url(raw_try_on_path)
 
     family_ratings_list = None
     family_rating_average = None
@@ -375,6 +384,8 @@ def outfit_to_response(
         family_rating_average=family_rating_average,
         family_rating_count=family_rating_count,
         is_starter_suggestion=is_starter_suggestion,
+        try_on_image_path=try_on_image_path,
+        try_on_image_url=try_on_image_url,
         created_at=outfit.created_at,
     )
 
@@ -420,6 +431,7 @@ async def suggest_outfit(
             exclude_items=request.exclude_items,
             include_items=request.include_items,
             time_of_day=request.time_of_day,
+            language=request.language,
         )
     except InsufficientWardrobeError as e:
         raise HTTPException(

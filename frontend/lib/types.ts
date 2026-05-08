@@ -298,6 +298,8 @@ export interface Outfit {
   reasoning?: string;
   style_notes?: string;
   highlights?: string[];
+  try_on_image_path?: string | null;
+  try_on_image_url?: string | null;
   weather?: WeatherData;
   items: OutfitItem[];
   feedback?: FeedbackSummary;
@@ -309,6 +311,7 @@ export interface Outfit {
 
 export interface SuggestRequest {
   occasion: string;
+  language?: 'en' | 'zh';
   weather_override?: {
     temperature: number;
     feels_like?: number;
