@@ -326,7 +326,11 @@ class AIService:
         }
         if temperature is not None and not uses_completion_tokens:
             body["temperature"] = temperature
-        if logprobs:
+        if logprobs and not uses_completion_tokens:
+            # NV Inference Hub's gpt-5.x chat endpoint currently rejects the
+            # OpenAI logprobs parameters with HTTP 400. Logprobs are optional
+            # for Wardrowbe tagging, so omit them for gpt-5.x to let the
+            # structured analysis call succeed and populate edit fields.
             body["logprobs"] = True
             body["top_logprobs"] = 3
         return body
@@ -458,14 +462,21 @@ class AIService:
         tags.primary_color = validate_value(
             first_text("primary_color", "color", "main_color", "dominant_color"), VALID_COLORS
         )
-        tags.colors = validate_list(data.get("colors", []), VALID_COLORS)
+        def normalize_string_list(value) -> list:
+            if isinstance(value, list):
+                return value
+            if isinstance(value, str) and value.strip():
+                return [value]
+            return []
+
+        tags.colors = validate_list(normalize_string_list(data.get("colors", [])), VALID_COLORS)
         if tags.primary_color and tags.primary_color not in tags.colors:
             tags.colors.insert(0, tags.primary_color)
         tags.pattern = validate_value(data.get("pattern"), VALID_PATTERNS)
         tags.material = validate_value(data.get("material"), VALID_MATERIALS)
         tags.formality = validate_value(data.get("formality"), VALID_FORMALITY)
-        tags.style = validate_list(data.get("style", []), VALID_STYLES)
-        tags.season = validate_list(data.get("season", []), VALID_SEASONS)
+        tags.style = validate_list(normalize_string_list(data.get("style", [])), VALID_STYLES)
+        tags.season = validate_list(normalize_string_list(data.get("season", [])), VALID_SEASONS)
         tags.fit = validate_value(data.get("fit"), VALID_FIT)
         tags.brand = first_text("brand", "label", "designer", "manufacturer")
         tags.condition = first_text("condition")

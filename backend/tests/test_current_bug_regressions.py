@@ -32,6 +32,40 @@ class TestAIAnalysisFieldRegression:
         assert tags.brand == "Uniqlo"
         assert tags.description == "A crisp navy oxford shirt."
 
+    def test_gpt5_request_omits_optional_logprobs_that_nvhub_rejects(self):
+        service = AIService()
+
+        body = service._build_chat_request(
+            model="openai/openai/gpt-5.5",
+            messages=[{"role": "user", "content": "x"}],
+            logprobs=True,
+        )
+
+        assert "max_completion_tokens" in body
+        assert "logprobs" not in body
+        assert "top_logprobs" not in body
+
+    def test_clothing_analysis_prompt_requests_editable_fields(self):
+        from app.services.ai_service import TAGGING_PROMPT
+
+        for field in ("name", "type", "brand", "primary_color", "description"):
+            assert f'"{field}"' in TAGGING_PROMPT or f"- {field}:" in TAGGING_PROMPT
+
+    def test_parser_accepts_string_style_and_season_lists(self):
+        service = AIService()
+        tags = service._parse_tags_from_response(
+            '{"name":"Gray Oversized Hoodie","type":"hoodie","primary_color":"gray",'
+            '"colors":"gray","style":"streetwear","season":"fall",'
+            '"brand":null,"description":"An oversized gray hoodie."}'
+        )
+
+        assert tags.ai_name == "Gray Oversized Hoodie"
+        assert tags.type == "hoodie"
+        assert tags.primary_color == "gray"
+        assert tags.colors == ["gray"]
+        assert tags.style == ["streetwear"]
+        assert tags.season == ["fall"]
+
     def test_tags_to_item_fields_prefers_ai_name_when_returned(self):
         tags = ClothingTags(
             type="shirt",

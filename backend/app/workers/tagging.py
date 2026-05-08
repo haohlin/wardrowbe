@@ -168,7 +168,10 @@ async def tag_item_image(ctx: dict, item_id: str, image_path: str) -> dict[str, 
             ai_fields = tags_to_item_fields(tags, tags.raw_response)
 
             for field, value in ai_fields.items():
-                # Always update AI metadata fields (including tags JSONB and description)
+                # Always update AI/system fields and AI-derived edit fields during
+                # explicit analysis/re-analysis. This matches the button label:
+                # running AI Analyze should refresh name/type/brand/color/notes
+                # from the image, not leave stale user/default values behind.
                 if field in (
                     "ai_processed",
                     "ai_confidence",
@@ -176,28 +179,20 @@ async def tag_item_image(ctx: dict, item_id: str, image_path: str) -> dict[str, 
                     "ai_raw_response",
                     "tags",
                     "ai_description",
+                    "name",
+                    "type",
+                    "subtype",
+                    "brand",
+                    "primary_color",
+                    "notes",
+                    "colors",
+                    "pattern",
+                    "material",
+                    "style",
+                    "formality",
+                    "season",
                 ):
                     setattr(item, field, value)
-                # Only update content fields if user hasn't set them (or they're default/unknown)
-                elif field == "type":
-                    if not item.type or item.type == "unknown":
-                        setattr(item, field, value)
-                elif field == "subtype":
-                    if not item.subtype:
-                        setattr(item, field, value)
-                elif field == "primary_color":
-                    if not item.primary_color or item.primary_color == "unknown":
-                        setattr(item, field, value)
-                else:
-                    # For other fields (colors, pattern, material, style, etc.), only set if not already set
-                    current_value = getattr(item, field, None)
-                    if (
-                        current_value is None
-                        or current_value == []
-                        or current_value == ""
-                        or current_value == {}
-                    ):
-                        setattr(item, field, value)
 
             await db.commit()
             logger.info(f"Updated item {item_id} with AI tags (status=ready)")

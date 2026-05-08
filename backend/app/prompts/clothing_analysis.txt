@@ -1,11 +1,19 @@
 OUTPUT ONLY JSON. NO TEXT. NO DESCRIPTIONS. NO EXPLANATIONS.
 
-Analyze the MAIN clothing item in this image. Use ONLY these values:
+Analyze the MAIN clothing item in this image. Return a single JSON object that can directly fill the wardrobe edit form.
 
-TYPE (required, pick one):
+Required editable fields:
+- name: concise display name, 3-8 words. Include visible brand only if readable/obvious; otherwise omit brand from name.
+- type: pick exactly one from TYPE values below.
+- subtype: more specific garment subtype or null.
+- brand: visible/readable brand or null. Do not guess.
+- primary_color: pick exactly one from PRIMARY_COLOR values below.
+- description: one sentence notes for the item.
+
+TYPE values:
 shirt, t-shirt, top, pants, jeans, shorts, dress, jumpsuit, skirt, jacket, coat, sweater, hoodie, blazer, vest, cardigan, polo, blouse, tank-top, shoes, sneakers, boots, sandals, socks, tie, hat, scarf, belt, bag, accessories
 
-SUBTYPE (optional): A more specific name within the type. Examples:
+SUBTYPE examples:
 - shirt → henley, button-down, oxford, flannel, hawaiian, camp-collar
 - pants → chinos, joggers, cargo, trousers, leggings, sweatpants
 - dress → sundress, slip-dress, maxi, midi, wrap, shirt-dress, a-line
@@ -19,26 +27,26 @@ SUBTYPE (optional): A more specific name within the type. Examples:
 - tie → necktie, bow-tie, bolo
 Use null if the type is specific enough (e.g. jeans, hoodie, blazer).
 
-PRIMARY_COLOR (required, pick one):
+PRIMARY_COLOR values:
 black, white, gray, navy, blue, light-blue, red, burgundy, pink, green, olive, yellow, orange, purple, brown, tan, beige, cream, gold, silver
 
-PATTERN (required, pick one):
+PATTERN values:
 solid, striped, plaid, checkered, floral, graphic, geometric, polka-dot, camouflage, animal-print
 
-MATERIAL (optional, pick one or null):
+MATERIAL values:
 cotton, denim, leather, wool, polyester, silk, linen, knit, fleece, suede, velvet, nylon, canvas
 
-FORMALITY (required, pick one):
+FORMALITY values:
 very-casual, casual, smart-casual, business-casual, formal
 
-STYLE (pick 1-2 that best describe):
+STYLE values, pick 1-2:
 casual, classic, sporty, minimalist, bohemian, preppy, streetwear, elegant, athletic, vintage, modern, rugged
 
-SEASON (pick all that apply):
+SEASON values, pick all that apply:
 spring, summer, fall, winter, all-season
 
-FIT (optional, pick one or null):
+FIT values:
 slim, regular, relaxed, oversized, tailored, cropped
 
 Output this exact JSON structure (a single object, NOT wrapped in an array):
-{{"type":"TYPE","subtype":null,"primary_color":"COLOR","colors":["COLOR1"],"pattern":"PATTERN","material":null,"formality":"FORMALITY","style":["STYLE1"],"season":["SEASON1","SEASON2"],"fit":null}}
+{"name":"DISPLAY NAME","type":"TYPE","subtype":null,"brand":null,"primary_color":"COLOR","colors":["COLOR1"],"pattern":"PATTERN","material":null,"formality":"FORMALITY","style":["STYLE1"],"season":["SEASON1","SEASON2"],"fit":null,"description":"ONE SENTENCE NOTES"}
