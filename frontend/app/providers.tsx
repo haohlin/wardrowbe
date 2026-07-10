@@ -7,6 +7,8 @@ import { toast, Toaster } from 'sonner';
 import { ThemeProvider } from '@/components/theme-provider';
 import { AuthProvider } from '@/components/auth-provider';
 import { ApiError, NetworkError } from '@/lib/api';
+import { LanguageProvider } from '@/lib/i18n';
+import { AiTaskProvider } from '@/lib/ai-task-context';
 
 function handleError(error: unknown) {
   if (error instanceof NetworkError) {
@@ -66,8 +68,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
             enableSystem
             disableTransitionOnChange
           >
-            {children}
-            <Toaster richColors position="top-center" />
+            <LanguageProvider>
+              <AiTaskProvider>
+                {children}
+                <Toaster richColors position="top-center" />
+              </AiTaskProvider>
+            </LanguageProvider>
           </ThemeProvider>
         </QueryClientProvider>
       </AuthProvider>

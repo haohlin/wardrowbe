@@ -12,6 +12,7 @@ from app.services.recommendation_service import (
     RecommendationService,
     get_time_of_day,
 )
+from app.services.weather_service import WeatherData
 
 
 def _make_user(timezone: str = "UTC") -> User:
@@ -98,6 +99,8 @@ class TestPromptTemplate:
         assert "Time of day" in prompt
         assert "Full day" in prompt
         assert "{time_of_day}" in prompt
+        assert "Outerwear order" in prompt
+        assert "never style a jacket or shell underneath a cardigan" in prompt
 
     def test_prompt_format_accepts_time_of_day(self):
         from app.services.recommendation_service import RECOMMENDATION_PROMPT
@@ -156,6 +159,7 @@ class TestSuggestRequestTimeOfDay:
             json={
                 "occasion": "casual",
                 "time_of_day": "evening",
+                "preference_note": "Keep the outfit clean and avoid bulky layering.",
                 "weather_override": {
                     "temperature": 20,
                     "condition": "clear",
@@ -336,3 +340,167 @@ class TestPromptPreRanking:
         from app.services.recommendation_service import RECOMMENDATION_PROMPT
 
         assert "pre-ranked" in RECOMMENDATION_PROMPT
+
+
+class TestSuggestionLanguageAndTryOn:
+    def test_language_instruction_requests_chinese_output(self):
+        service = RecommendationService.__new__(RecommendationService)
+        instruction = service._language_instruction("zh")
+        assert "Simplified Chinese" in instruction
+        assert "headline" in instruction
+
+    def test_language_instruction_defaults_to_english(self):
+        service = RecommendationService.__new__(RecommendationService)
+        instruction = service._language_instruction("en")
+        assert "English" in instruction
+
+    def test_try_on_prompt_uses_gender_body_measurements_and_front_back(self):
+        service = RecommendationService.__new__(RecommendationService)
+        user = _make_user()
+        user.gender = "male"
+        user.body_measurements = {"height": 180, "weight": 75, "chest": 96, "waist": 82, "inseam": 78}
+        item = _make_item(name="Black Slim Trousers", type="pants", primary_color="black")
+
+        prompt = service._build_try_on_prompt(
+            user=user,
+            items=[item],
+            outfit_data={"headline": "城市极简", "highlights": ["比例干净"]},
+            occasion="casual",
+            language="zh",
+        )
+
+        assert "front and back" in prompt
+        assert "male" in prompt
+        assert "180cm" in prompt
+        assert "82cm" in prompt
+        assert "Black Slim Trousers" in prompt
+        assert "Chinese" in prompt
+        assert "Do not show the model's head" in prompt
+        assert "crop above the neck" in prompt
+        assert "no face" in prompt
+        assert "neck to shoes" in prompt
+        assert "complete shoes" in prompt
+        assert "feet fully visible" in prompt
+
+    def test_try_on_prompt_explicitly_renders_female_silhouette_without_hair(self):
+        service = RecommendationService.__new__(RecommendationService)
+        user = _make_user()
+        user.gender = "female"
+        user.body_measurements = {"height": 166, "weight": 47, "shirt_size": "S"}
+        item = _make_item(name="Light Green Shirt", type="shirt", primary_color="green")
+
+        prompt = service._build_try_on_prompt(
+            user=user,
+            items=[item],
+            outfit_data={"headline": "Polished Green Minimalism"},
+            occasion="casual",
+            language="en",
+        )
+
+        assert "female adult model" in prompt
+        assert "feminine body silhouette" in prompt
+        assert "Do not render a male or masculine body" in prompt
+        assert "no visible hair" in prompt
+        assert "Hair should not be used to express gender" in prompt
+
+    def test_try_on_prompt_orders_shell_outside_cardigan(self):
+        service = RecommendationService.__new__(RecommendationService)
+        user = _make_user()
+        shell = _make_item(name="Tan Soft Shell Outdoor Jacket", type="jacket", subtype="soft shell", primary_color="tan")
+        cardigan = _make_item(name="Long Rope Cardigan", type="cardigan", primary_color="cream")
+
+        prompt = service._build_try_on_prompt(
+            user=user,
+            items=[shell, cardigan],
+            outfit_data={"headline": "Layer Test"},
+            occasion="outdoor",
+            language="en",
+        )
+
+        assert "outermost" in prompt
+        assert "never place a jacket or shell underneath a cardigan" in prompt
+        assert "Tan Soft Shell Outdoor Jacket" in prompt
+        assert "Long Rope Cardigan" in prompt
+
+    def test_format_preferences_includes_user_request(self):
+        service = RecommendationService.__new__(RecommendationService)
+        text = service._format_preferences_for_prompt(
+            None,
+            None,
+            None,
+            None,
+            occasion="casual",
+            user_request="No outdoor shell under long cardigan; make it cleaner.",
+        )
+        assert "CURRENT USER REQUEST" in text
+        assert "No outdoor shell" in text
+
+
+class TestExistingOutfitSuggestion:
+    @pytest.mark.asyncio
+    async def test_suggest_existing_outfit_picks_best_weather_match(self, db_session):
+        user = _make_user()
+        user.location_lat = 31.2
+        user.location_lon = 121.5
+        db_session.add(user)
+        await db_session.flush()
+
+        shirt = ClothingItem(
+            user_id=user.id,
+            type="shirt",
+            image_path=f"test/{uuid4()}.jpg",
+            status=ItemStatus.ready,
+            primary_color="green",
+        )
+        pants = ClothingItem(
+            user_id=user.id,
+            type="pants",
+            image_path=f"test/{uuid4()}.jpg",
+            status=ItemStatus.ready,
+            primary_color="beige",
+        )
+        cold = Outfit(
+            user_id=user.id,
+            occasion="formal",
+            status=OutfitStatus.pending,
+            source=OutfitSource.on_demand,
+            weather_data={"temperature": 3, "condition": "snow"},
+        )
+        warm = Outfit(
+            user_id=user.id,
+            occasion="casual",
+            status=OutfitStatus.accepted,
+            source=OutfitSource.manual,
+            weather_data={"temperature": 20, "condition": "clear"},
+            ai_raw_response={"highlights": ["Original highlight"], "try_on_image_path": "user/outfit_tryons/look.png"},
+        )
+        db_session.add_all([shirt, pants, cold, warm])
+        await db_session.flush()
+        db_session.add_all([
+            OutfitItem(outfit_id=warm.id, item_id=shirt.id, position=0),
+            OutfitItem(outfit_id=warm.id, item_id=pants.id, position=1),
+        ])
+        await db_session.commit()
+
+        service = RecommendationService(db_session)
+        weather = WeatherData(
+            temperature=21,
+            feels_like=21,
+            humidity=50,
+            precipitation_chance=10,
+            precipitation_mm=0,
+            wind_speed=0,
+            condition="clear",
+            condition_code=0,
+            is_day=True,
+            uv_index=0,
+            timestamp=datetime.now(UTC),
+        )
+        selected = await service.suggest_existing_outfit(
+            user=user, occasion="casual", weather_override=weather, time_of_day="evening"
+        )
+
+        assert selected.id == warm.id
+        assert selected.reasoning and "Best saved outfit" in selected.reasoning
+        assert selected.style_notes and "current scenario" in selected.style_notes
+        assert selected.ai_raw_response["try_on_image_path"] == "user/outfit_tryons/look.png"

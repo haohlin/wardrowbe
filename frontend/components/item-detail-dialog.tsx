@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import {
   Heart,
@@ -62,6 +62,7 @@ import { Item, CLOTHING_TYPES, CLOTHING_COLORS } from '@/lib/types';
 import { ColorEyedropper } from '@/components/color-eyedropper';
 import { GeneratePairingsDialog } from '@/components/generate-pairings-dialog';
 import { useFeatures } from '@/lib/hooks/use-features';
+import { useAiTasks } from '@/lib/ai-task-context';
 
 interface ItemDetailDialogProps {
   item: Item | null;
@@ -96,6 +97,8 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
   const rotateImage = useRotateImage();
   const removeBackground = useRemoveBackground();
   const { data: features } = useFeatures();
+  const { activeTask, startTask } = useAiTasks();
+  const runningAiTaskType = activeTask?.type;
   const logWash = useLogWash();
   const { data: washHistory } = useWashHistory(item?.id || '');
   const { data: wearStats } = useItemWearStats(item?.id || '');
@@ -103,9 +106,14 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
   const addImage = useAddItemImage();
   const deleteImage = useDeleteItemImage();
   const setPrimary = useSetPrimaryImage();
+  const previousItemIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (item) {
+      const previousItemId = previousItemIdRef.current;
+      const isNewItem = previousItemId !== item.id;
+      previousItemIdRef.current = item.id;
+
       setEditForm({
         name: item.name || '',
         type: item.type,
@@ -116,10 +124,23 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
         favorite: item.favorite,
         wash_interval: item.wash_interval ?? undefined,
       });
-      setIsEditing(false);
-      setActiveImageIndex(0);
+      if (isNewItem) {
+        setIsEditing(false);
+        setActiveImageIndex(0);
+      }
     }
-  }, [item?.id]);
+  }, [
+    item?.id,
+    item?.updated_at,
+    item?.name,
+    item?.type,
+    item?.subtype,
+    item?.brand,
+    item?.primary_color,
+    item?.notes,
+    item?.favorite,
+    item?.wash_interval,
+  ]);
 
   if (!item) return null;
 
@@ -183,7 +204,13 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
 
   const handleReanalyze = async () => {
     try {
-      await reanalyzeItem.mutateAsync(item.id);
+      await startTask(
+        {
+          type: 'item-reanalysis',
+          label: `Re-analyzing ${item.name || item.type} with AI...`,
+        },
+        () => reanalyzeItem.mutateAsync(item.id)
+      );
       // Status will update to 'processing' and UI will reflect it
     } catch (error) {
       console.error('Failed to trigger re-analysis:', error);
@@ -203,7 +230,13 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
 
   const handleRemoveBackground = async () => {
     try {
-      await removeBackground.mutateAsync({ id: item.id });
+      await startTask(
+        {
+          type: 'background-removal',
+          label: `Removing background from ${item.name || item.type} with AI...`,
+        },
+        () => removeBackground.mutateAsync({ id: item.id })
+      );
       setImageKey((k) => k + 1);
       toast.success('Background removed');
     } catch (error) {
@@ -212,7 +245,8 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
     }
   };
 
-  const isAnalyzing = reanalyzeItem.isPending || item.status === 'processing';
+  const isAnalyzing = runningAiTaskType === 'item-reanalysis' || reanalyzeItem.isPending || item.status === 'processing';
+  const isRemovingBackground = runningAiTaskType === 'background-removal' || removeBackground.isPending;
 
   // Use signed URL from backend for better quality in detail view
   const imageUrl = item.image_url || item.image_path;
@@ -299,10 +333,10 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
                   variant="ghost"
                   size="icon"
                   onClick={handleRemoveBackground}
-                  disabled={removeBackground.isPending || !item.image_url}
+                  disabled={isRemovingBackground || !item.image_url}
                   title="Remove background"
                 >
-                  {removeBackground.isPending ? (
+                  {isRemovingBackground ? (
                     <Loader2 className="h-5 w-5 animate-spin" />
                   ) : (
                     <Eraser className="h-5 w-5" />

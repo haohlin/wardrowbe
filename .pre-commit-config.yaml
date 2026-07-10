@@ -25,3 +25,10 @@ repos:
         language: system
         files: ^frontend/.*\.(ts|tsx)$
         pass_filenames: false
+
+      - id: wardrowbe-preview-guard-structure
+        name: Wardrowbe preview guard structure
+        entry: bash -c 'cd backend && ../.venv/bin/python -m pytest -q tests/test_preview_guard.py'
+        language: system
+        files: ^(scripts/verify_wardrowbe_preview\.py|backend/tests/test_preview_guard\.py|Makefile|\.github/workflows/preview-guard\.yml)$
+        pass_filenames: false

@@ -1,6 +1,33 @@
 from app.services.ai_service import AIService, ClothingTags
 
 
+class TestRequestBody:
+    """Tests for OpenAI-compatible chat request construction."""
+
+    def test_gpt_5_5_request_omits_temperature(self):
+        """GPT-5.5 on NV Inference Hub rejects non-default temperature values."""
+        body = AIService()._build_chat_request(
+            model="openai/openai/gpt-5.5",
+            messages=[{"role": "user", "content": "hello"}],
+            temperature=0.4,
+        )
+
+        assert body["model"] == "openai/openai/gpt-5.5"
+        assert "temperature" not in body
+        assert "max_tokens" not in body
+        assert body["max_completion_tokens"] == AIService().settings.ai_max_tokens
+
+    def test_regular_model_request_keeps_temperature(self):
+        """Non-restricted OpenAI-compatible models keep the requested temperature."""
+        body = AIService()._build_chat_request(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": "hello"}],
+            temperature=0.4,
+        )
+
+        assert body["temperature"] == 0.4
+
+
 class TestTagParsing:
     """Tests for AI response parsing."""
 

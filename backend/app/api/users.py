@@ -1,5 +1,5 @@
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -30,6 +30,7 @@ class UserProfileResponse(BaseModel):
     role: str
     onboarding_completed: bool
     body_measurements: dict | None = None
+    gender: str | None = None
 
 
 class UserProfileUpdate(BaseModel):
@@ -39,6 +40,7 @@ class UserProfileUpdate(BaseModel):
     location_lon: Decimal | None = None
     location_name: str | None = None
     body_measurements: dict | None = None
+    gender: Literal["female", "male", "non_binary", "prefer_not_to_say"] | None = None
 
 
 @router.get("", response_model=UserProfileResponse)
@@ -89,6 +91,7 @@ def _user_response(user: User) -> UserProfileResponse:
         role=user.role,
         onboarding_completed=user.onboarding_completed,
         body_measurements=user.body_measurements,
+        gender=user.gender,
     )
 
 

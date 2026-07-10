@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useSession } from 'next-auth/react';
@@ -36,17 +36,20 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
 import { api, ApiError, setAccessToken } from '@/lib/api';
-import { OCCASIONS, Outfit, SuggestRequest } from '@/lib/types';
+import { AutoSuggestResponse, OCCASIONS, Outfit, SuggestRequest } from '@/lib/types';
 import { useWeather, Weather } from '@/lib/hooks/use-weather';
 import { usePreferences } from '@/lib/hooks/use-preferences';
 import { cn } from '@/lib/utils';
 import { TempUnit, formatTemp, displayValue, toF, toCelsius } from '@/lib/temperature';
+import { useI18n } from '@/lib/i18n';
+import { useAiTasks } from '@/lib/ai-task-context';
 
 // Map occasion values to icons and colors
 const OCCASION_CONFIG: Record<string, { icon: React.ReactNode; color: string }> = {
@@ -93,6 +96,22 @@ function getWeatherHint(weather: Weather): string {
 interface WeatherOverride {
   temperature: number;
   condition: 'sunny' | 'cloudy' | 'rainy';
+}
+
+
+function comboForOutfit(candidate: Outfit): string[] {
+  return [...new Set(candidate.items.map((item) => item.id))].sort();
+}
+
+function mergeShownCombos(current: string[][], candidates: Outfit[]): string[][] {
+  const byKey = new Map(current.map((combo) => [combo.join('|'), combo]));
+  candidates.forEach((candidate) => {
+    const combo = comboForOutfit(candidate);
+    if (combo.length >= 2) {
+      byKey.set(combo.join('|'), combo);
+    }
+  });
+  return Array.from(byKey.values());
 }
 
 function WeatherCard({ weather, isLoading, temperatureUnit }: { weather?: Weather; isLoading: boolean; temperatureUnit: TempUnit }) {
@@ -297,6 +316,10 @@ function OutfitResult({
   onReject,
   onTryAnother,
   onNewRequest,
+  onRefine,
+  refinementNote,
+  onRefinementNoteChange,
+  isGenerating,
 }: {
   outfit: Outfit;
   occasion: string;
@@ -305,7 +328,17 @@ function OutfitResult({
   onReject: () => void;
   onTryAnother: () => void;
   onNewRequest: () => void;
+  onRefine: () => void;
+  refinementNote: string;
+  onRefinementNoteChange: (value: string) => void;
+  isGenerating: boolean;
 }) {
+  const { t, language } = useI18n();
+  const localizedText = outfit.localized_text?.[language === 'zh' ? 'zh' : 'en'] ?? null;
+  const displayReasoning = localizedText?.headline || outfit.reasoning;
+  const displayHighlights = localizedText?.highlights?.length ? localizedText.highlights : outfit.highlights;
+  const displayTip = localizedText?.styling_tip || outfit.style_notes;
+
   return (
     <div className="space-y-6">
       {/* Header with occasion and new request */}
@@ -349,22 +382,38 @@ function OutfitResult({
         <div className="bg-gradient-to-r from-primary/10 to-primary/5 p-4 border-b">
           <div className="flex items-center gap-2">
             <Sparkles className="h-5 w-5 text-primary" />
-            <h3 className="font-semibold">Your Outfit</h3>
+            <h3 className="font-semibold">{t('Your Outfit')}</h3>
           </div>
-          {outfit.reasoning && (
-            <p className="mt-2 text-base font-medium text-foreground">{outfit.reasoning}</p>
+          {displayReasoning && (
+            <p data-i18n-skip="true" className="mt-2 text-base font-medium text-foreground">{displayReasoning}</p>
           )}
-          {outfit.highlights && outfit.highlights.length > 0 && (
+          {displayHighlights && displayHighlights.length > 0 && (
             <ul className="mt-3 space-y-1.5">
-              {outfit.highlights.map((highlight, index) => (
-                <li key={index} className="flex items-start gap-2 text-sm text-muted-foreground">
-                  <span className="text-primary mt-0.5">•</span>
-                  <span>{highlight}</span>
-                </li>
+              {displayHighlights.map((highlight, index) => (
+                  <li key={index} data-i18n-skip="true" className="flex items-start gap-2 text-sm text-muted-foreground">
+                    <span className="text-primary mt-0.5">•</span>
+                    <span>{highlight}</span>
+                  </li>
               ))}
             </ul>
           )}
         </div>
+        {outfit.try_on_image_url && (
+          <div className="border-b bg-background">
+            <div className="relative w-full aspect-[4/3] sm:aspect-[16/9]">
+              <Image
+                src={outfit.try_on_image_url}
+                alt={t('Model wearing the suggested outfit, front and back views')}
+                fill
+                className="object-contain bg-muted/30"
+                sizes="(max-width: 640px) 100vw, 672px"
+              />
+            </div>
+            <p className="px-4 py-2 text-xs text-muted-foreground">
+              {t('AI try-on preview with front and back views based on your saved body measurements.')}
+            </p>
+          </div>
+        )}
         <CardContent className="p-4">
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {outfit.items.map((item) => (
@@ -402,19 +451,55 @@ function OutfitResult({
             ))}
           </div>
 
-          {outfit.style_notes && (
+          {displayTip && (
             <div className="mt-4 p-3 bg-muted rounded-lg border">
-              <p className="text-sm text-muted-foreground">
-                <span className="font-medium text-foreground">Tip:</span> {outfit.style_notes}
+              <p data-i18n-skip="true" className="text-sm text-muted-foreground">
+                <span className="font-medium text-foreground">Tip:</span> {displayTip}
               </p>
             </div>
           )}
+          {outfit.debug_prompt && (
+            <details className="mt-4 rounded-lg border bg-muted/50 p-3 text-sm">
+              <summary className="cursor-pointer font-medium text-foreground">Debug AI prompt</summary>
+              <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-words text-xs text-muted-foreground">
+                {outfit.debug_prompt}
+              </pre>
+            </details>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Refinement input */}
+      <Card>
+        <CardContent className="p-4 space-y-3">
+          <div className="space-y-1">
+            <h3 className="font-semibold">{t('Adjust this suggestion')}</h3>
+            <p className="text-sm text-muted-foreground">
+              {t('Tell the stylist what to change, then generate a tweaked version.')}
+            </p>
+          </div>
+          <Textarea
+            value={refinementNote}
+            onChange={(e) => onRefinementNoteChange(e.target.value)}
+            placeholder={t('Example: make it cleaner, less bulky, no shell under cardigan')}
+            maxLength={500}
+            className="min-h-[96px]"
+          />
+          <Button
+            variant="outline"
+            onClick={onRefine}
+            disabled={isGenerating || !refinementNote.trim()}
+            className="w-full gap-2"
+          >
+            {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            {t('Tweak Suggestion')}
+          </Button>
         </CardContent>
       </Card>
 
       {/* Action buttons */}
       <div className="flex gap-3 justify-center">
-        <Button variant="outline" size="lg" onClick={onTryAnother} className="gap-2">
+        <Button variant="outline" size="lg" onClick={() => onTryAnother()} className="gap-2">
           <RefreshCw className="h-4 w-4" />
           Try Another
         </Button>
@@ -430,16 +515,181 @@ function OutfitResult({
   );
 }
 
+
+const examplePhotos = [
+  {
+    title: 'versatile light neutral top',
+    query: 'women neutral cream blouse wardrobe essential',
+    url: 'https://images.unsplash.com/photo-1564257631407-4deb1f99d992?auto=format&fit=crop&w=600&q=80',
+  },
+  {
+    title: 'clean tailored bottom',
+    query: 'women beige tailored trousers minimalist outfit',
+    url: 'https://images.unsplash.com/photo-1594633312681-425c7b97ccd1?auto=format&fit=crop&w=600&q=80',
+  },
+  {
+    title: 'compatible shoes',
+    query: 'black loafers women minimalist shoes',
+    url: 'https://images.unsplash.com/photo-1543163521-1bf539c55dd2?auto=format&fit=crop&w=600&q=80',
+  },
+];
+
+function isWardrobeGapError(message: string | null): boolean {
+  if (!message) return false;
+  const normalized = message.toLowerCase();
+  return normalized.includes('cannot make a good suggestion')
+    || normalized.includes('need at least')
+    || normalized.includes('no available wardrobe combo')
+    || normalized.includes('add more ready wardrobe items');
+}
+
+function WardrobeGapAdvice({ message }: { message: string }) {
+  const { t } = useI18n();
+  return (
+    <Card className="border-amber-500/40 bg-amber-500/5">
+      <CardContent className="p-4 space-y-4">
+        <div className="space-y-1">
+          <h3 className="font-semibold">{t('No available wardrobe combo')}</h3>
+          <p className="text-sm text-muted-foreground">{message}</p>
+          <p className="text-sm text-muted-foreground">
+            {t('Consider adding one flexible top, one clean bottom, and compatible shoes that match your current scenario.')}
+          </p>
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          {examplePhotos.map((examplePhoto) => (
+            <a
+              key={examplePhoto.title}
+              href={`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(examplePhoto.query)}`}
+              target="_blank"
+              rel="noreferrer"
+              className="group overflow-hidden rounded-lg border bg-background"
+            >
+              <div className="relative aspect-square">
+                <Image
+                  src={examplePhoto.url}
+                  alt={examplePhoto.title}
+                  fill
+                  sizes="(max-width: 768px) 33vw, 200px"
+                  className="object-cover transition-transform group-hover:scale-105"
+                />
+              </div>
+              <p className="p-2 text-xs text-muted-foreground">{t(examplePhoto.title)}</p>
+            </a>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function AvailableOutfitChoices({
+  outfits,
+  onSelect,
+  onNewRequest,
+  onGenerateNew,
+  isGenerating,
+}: {
+  outfits: Outfit[];
+  onSelect: (outfit: Outfit) => void;
+  onNewRequest: () => void;
+  onGenerateNew: () => void;
+  isGenerating: boolean;
+}) {
+  const { t, language } = useI18n();
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-semibold">{t('Choose from available outfits')}</h2>
+          <p className="text-sm text-muted-foreground">
+            {t('I found saved outfit previews that fit this occasion and weather.')}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={onGenerateNew} disabled={isGenerating} className="gap-2">
+            {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+            {t('Create a new AI outfit')}
+          </Button>
+          <Button variant="ghost" size="sm" onClick={onNewRequest}>
+            {t('Start over')}
+          </Button>
+        </div>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        {outfits.map((candidate) => {
+          const localizedText = candidate.localized_text?.[language === 'zh' ? 'zh' : 'en'] ?? null;
+          const title = localizedText?.headline || candidate.reasoning || candidate.name || t('Available outfit');
+          const highlights = localizedText?.highlights?.length ? localizedText.highlights : candidate.highlights;
+          return (
+            <Card key={candidate.id} className="overflow-hidden">
+              {candidate.try_on_image_url ? (
+                <div className="relative aspect-[4/3] bg-muted/30">
+                  <Image
+                    src={candidate.try_on_image_url}
+                    alt={t('Saved outfit preview')}
+                    fill
+                    className="object-contain"
+                    sizes="(max-width: 640px) 100vw, 50vw"
+                  />
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 gap-2 p-3 bg-muted/30">
+                  {candidate.items.slice(0, 3).map((item) => (
+                    <div key={item.id} className="relative aspect-square rounded-lg overflow-hidden bg-background">
+                      {item.thumbnail_url ? (
+                        <Image src={item.thumbnail_url} alt={item.name || item.type} fill className="object-cover" sizes="120px" />
+                      ) : (
+                        <div className="h-full w-full flex items-center justify-center">
+                          <Shirt className="h-6 w-6 text-muted-foreground/50" />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <CardContent className="p-4 space-y-3">
+                <div>
+                  <p data-i18n-skip="true" className="font-medium line-clamp-2">{title}</p>
+                  {highlights && highlights[0] && (
+                    <p data-i18n-skip="true" className="mt-1 text-sm text-muted-foreground line-clamp-2">{highlights[0]}</p>
+                  )}
+                </div>
+                <Button className="w-full" onClick={() => onSelect(candidate)}>
+                  {t('Use this outfit')}
+                </Button>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function SuggestPage() {
   const { data: session } = useSession();
   const { data: weather, isLoading: weatherLoading } = useWeather();
   const { data: prefs } = usePreferences();
+  const { t, language } = useI18n();
+  const { activeTask, lastCompletedTask, startTask, clearCompletedTask } = useAiTasks();
+  const activeSuggestionTask = activeTask?.type === 'outfit-suggestion' ? activeTask : null;
+  const completedSuggestionTask = lastCompletedTask?.type === 'outfit-suggestion' ? lastCompletedTask : null;
+  const isGenerating = Boolean(activeSuggestionTask);
+  const completedSuggestionResult = completedSuggestionTask?.status === 'success'
+    ? completedSuggestionTask.result as AutoSuggestResponse | undefined
+    : undefined;
+  const completedSuggestionError = completedSuggestionTask?.status === 'error'
+    ? completedSuggestionTask.errorMessage || 'Failed to generate outfit suggestion. Please try again.'
+    : null;
   const temperatureUnit: TempUnit = prefs?.temperature_unit === 'fahrenheit' ? 'fahrenheit' : 'celsius';
   const [selectedOccasion, setSelectedOccasion] = useState<string | null>(null);
   const [occasionInitialized, setOccasionInitialized] = useState(false);
   const [weatherOverride, setWeatherOverride] = useState<WeatherOverride | null>(null);
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [preferenceNote, setPreferenceNote] = useState('');
+  const [refinementNote, setRefinementNote] = useState('');
   const [outfit, setOutfit] = useState<Outfit | null>(null);
+  const [availableOutfits, setAvailableOutfits] = useState<Outfit[] | null>(null);
+  const [shownOutfitCombos, setShownOutfitCombos] = useState<string[][]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -449,20 +699,61 @@ export default function SuggestPage() {
     }
   }, [prefs, occasionInitialized, selectedOccasion]);
 
-  const handleGenerate = async () => {
+  const rememberShownOutfits = useCallback((candidates: Outfit[]) => {
+    if (!candidates.length) return;
+    setShownOutfitCombos((current) => mergeShownCombos(current, candidates));
+  }, []);
+
+  useEffect(() => {
+    if (completedSuggestionResult) {
+      const outfits = completedSuggestionResult.outfits || [];
+      if (completedSuggestionResult.mode === 'existing' && outfits.length > 1) {
+        rememberShownOutfits(outfits);
+        setAvailableOutfits(outfits);
+        setOutfit(null);
+      } else {
+        setAvailableOutfits(null);
+        setOutfit(outfits[0] || null);
+      }
+      setRefinementNote('');
+      setError(null);
+      if (completedSuggestionTask) {
+        clearCompletedTask(completedSuggestionTask.id);
+      }
+    } else if (completedSuggestionError) {
+      setError(completedSuggestionError);
+      if (completedSuggestionTask) {
+        clearCompletedTask(completedSuggestionTask.id);
+      }
+    }
+  }, [completedSuggestionResult, completedSuggestionError, completedSuggestionTask, clearCompletedTask, rememberShownOutfits]);
+
+  const handleGenerate = async (options: { excludeShownCombos?: boolean; excludedCombos?: string[][]; forceGenerate?: boolean } = {}) => {
     if (!selectedOccasion) return;
 
     if (session?.accessToken) {
       setAccessToken(session.accessToken as string);
     }
 
-    setIsGenerating(true);
     setError(null);
 
     try {
+      const note = refinementNote.trim() || preferenceNote.trim();
       const request: SuggestRequest = {
         occasion: selectedOccasion,
+        language,
       };
+      if (options.forceGenerate) {
+        request.force_generate = true;
+      }
+      if (note) {
+        request.preference_note = note;
+      }
+
+      const excludedCombos = options.excludedCombos ?? shownOutfitCombos;
+      if (options.excludeShownCombos && excludedCombos.length > 0) {
+        request.excluded_combinations = excludedCombos;
+      }
 
       if (weatherOverride) {
         request.weather_override = {
@@ -474,8 +765,13 @@ export default function SuggestPage() {
         };
       }
 
-      const result = await api.post<Outfit>('/outfits/suggest', request);
-      setOutfit(result);
+      await startTask<AutoSuggestResponse>(
+        {
+          type: 'outfit-suggestion',
+          label: 'Finding or creating your AI outfit suggestion...',
+        },
+        () => api.post<AutoSuggestResponse>('/outfits/suggest/auto', request)
+      );
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -483,8 +779,6 @@ export default function SuggestPage() {
         setError('Failed to generate outfit suggestion. Please try again.');
       }
       console.error('Suggestion error:', err);
-    } finally {
-      setIsGenerating(false);
     }
   };
 
@@ -505,8 +799,28 @@ export default function SuggestPage() {
   };
 
   const handleTryAnother = () => {
+    const candidates = outfit ? [outfit] : [];
+    const excludedCombos = mergeShownCombos(shownOutfitCombos, candidates);
+    setShownOutfitCombos(excludedCombos);
     setOutfit(null);
-    handleGenerate();
+    handleGenerate({ excludeShownCombos: true, excludedCombos });
+  };
+
+  const handleGenerateFromPool = () => {
+    const excludedCombos = mergeShownCombos(shownOutfitCombos, availableOutfits ?? []);
+    setShownOutfitCombos(excludedCombos);
+    setAvailableOutfits(null);
+    setOutfit(null);
+    handleGenerate({ excludeShownCombos: true, excludedCombos, forceGenerate: true });
+  };
+
+  const handleRefine = () => {
+    if (!refinementNote.trim()) return;
+    const candidates = outfit ? [outfit] : [];
+    const excludedCombos = mergeShownCombos(shownOutfitCombos, candidates);
+    setShownOutfitCombos(excludedCombos);
+    setOutfit(null);
+    handleGenerate({ excludeShownCombos: true, excludedCombos });
   };
 
   const handleReject = async () => {
@@ -522,13 +836,20 @@ export default function SuggestPage() {
       console.error('Reject error:', err);
     }
 
+    const candidates = outfit ? [outfit] : [];
+    const excludedCombos = mergeShownCombos(shownOutfitCombos, candidates);
+    setShownOutfitCombos(excludedCombos);
     setOutfit(null);
-    handleGenerate();
+    handleGenerate({ excludeShownCombos: true, excludedCombos });
   };
 
   const handleNewRequest = () => {
     setOutfit(null);
+    setAvailableOutfits(null);
     setSelectedOccasion(null);
+    setPreferenceNote('');
+    setRefinementNote('');
+    setShownOutfitCombos([]);
     setError(null);
   };
 
@@ -543,13 +864,28 @@ export default function SuggestPage() {
       </div>
 
       {error && (
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
+        isWardrobeGapError(error) ? (
+          <WardrobeGapAdvice message={error} />
+        ) : (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )
       )}
 
-      {!outfit ? (
+      {availableOutfits ? (
+        <AvailableOutfitChoices
+          outfits={availableOutfits}
+          onSelect={(selected) => {
+            setOutfit(selected);
+            setAvailableOutfits(null);
+          }}
+          onNewRequest={handleNewRequest}
+          onGenerateNew={handleGenerateFromPool}
+          isGenerating={isGenerating}
+        />
+      ) : !outfit ? (
         <div className="space-y-6">
           {/* Weather context */}
           <WeatherCard weather={weather} isLoading={weatherLoading} temperatureUnit={temperatureUnit} />
@@ -573,23 +909,40 @@ export default function SuggestPage() {
                 temperatureUnit={temperatureUnit}
               />
 
+              {/* Preference note */}
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <h2 className="font-semibold">{t('Preference for this suggestion')}</h2>
+                  <p className="text-sm text-muted-foreground">
+                    {t('Optional: tell the stylist what you want or want to avoid today.')}
+                  </p>
+                </div>
+                <Textarea
+                  value={preferenceNote}
+                  onChange={(e) => setPreferenceNote(e.target.value)}
+                  placeholder={t('Example: clean minimalist, no bulky layering, warmer for tonight')}
+                  maxLength={500}
+                  className="min-h-[96px]"
+                />
+              </div>
+
               {/* Generate button */}
               <div className="pt-2">
                 <Button
                   size="lg"
                   className="w-full gap-2"
-                  onClick={handleGenerate}
+                  onClick={() => handleGenerate()}
                   disabled={!selectedOccasion || isGenerating}
                 >
                   {isGenerating ? (
                     <>
                       <Loader2 className="h-5 w-5 animate-spin" />
-                      Creating your look...
+                      Finding or creating your look...
                     </>
                   ) : (
                     <>
                       <Sparkles className="h-5 w-5" />
-                      Get Suggestion
+                      {t('AI Suggestion')}
                     </>
                   )}
                 </Button>
@@ -606,6 +959,10 @@ export default function SuggestPage() {
           onReject={handleReject}
           onTryAnother={handleTryAnother}
           onNewRequest={handleNewRequest}
+          onRefine={handleRefine}
+          refinementNote={refinementNote}
+          onRefinementNoteChange={setRefinementNote}
+          isGenerating={isGenerating}
         />
       )}
     </div>

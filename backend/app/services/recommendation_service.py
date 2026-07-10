@@ -1,6 +1,10 @@
+import base64
 import json
 import logging
+import mimetypes
+import httpx
 import re
+from pathlib import Path
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
@@ -22,6 +26,7 @@ from app.models.outfit import (
 )
 from app.models.preference import UserPreference
 from app.models.user import User
+from app.config import get_settings
 from app.services.ai_service import AIService, require_internal_ai
 from app.services.item_scorer import get_season, score_items
 from app.services.suggestion_cache import pop_suggestion, push_suggestions
@@ -43,7 +48,10 @@ SINGLE_OUTFIT_FORMAT = (
     '"highlights": ["One short sentence each — vary your reasoning across color, texture, '
     'proportion, occasion, weather, or time of day"], '
     '"styling_tip": "One specific, actionable styling detail — do not suggest rolling up '
-    'sleeves every time, vary your advice"}}'
+    'sleeves every time, vary your advice", '
+    '"localized_text": {"en": {"headline": "English title", "highlights": ["English bullet"], '
+    '"styling_tip": "English tip"}, "zh": {"headline": "简体中文标题", "highlights": ["简体中文要点"], '
+    '"styling_tip": "简体中文提示"}}}}'
 )
 
 
@@ -116,6 +124,53 @@ class RecommendationService:
 
         return items
 
+    async def get_candidate_item_diagnostics(
+        self,
+        user: User,
+        preferences: UserPreference | None,
+        exclude_items: list[UUID],
+    ) -> dict[str, int]:
+        result = await self.db.execute(
+            select(ClothingItem).where(
+                and_(
+                    ClothingItem.user_id == user.id,
+                    ClothingItem.status == ItemStatus.ready,
+                    ClothingItem.is_archived.is_(False),
+                )
+            )
+        )
+        ready_items = list(result.scalars().all())
+        explicit_excluded = set(exclude_items or [])
+        preference_excluded = set(preferences.excluded_item_ids or []) if preferences else set()
+
+        return {
+            "minimum_required": 2,
+            "ready": len(ready_items),
+            "needs_wash": sum(1 for item in ready_items if item.needs_wash),
+            "unknown_type": sum(1 for item in ready_items if not item.type or item.type == "unknown"),
+            "excluded_by_request": sum(1 for item in ready_items if item.id in explicit_excluded),
+            "excluded_by_preferences": sum(1 for item in ready_items if item.id in preference_excluded),
+        }
+
+    def _insufficient_wardrobe_message(self, usable_count: int, diagnostics: dict[str, int]) -> str:
+        reasons = []
+        if diagnostics.get("unknown_type"):
+            reasons.append(f"{diagnostics['unknown_type']} unknown type")
+        if diagnostics.get("needs_wash"):
+            reasons.append(f"{diagnostics['needs_wash']} need washing")
+        if diagnostics.get("excluded_by_request"):
+            reasons.append(f"{diagnostics['excluded_by_request']} excluded by current filters")
+        if diagnostics.get("excluded_by_preferences"):
+            reasons.append(f"{diagnostics['excluded_by_preferences']} excluded by preferences")
+
+        reason_text = f" Blocked items: {', '.join(reasons)}." if reasons else ""
+        return (
+            f"Need at least {diagnostics.get('minimum_required', 2)} usable items to generate a suggestion; "
+            f"found {usable_count} usable out of {diagnostics.get('ready', 0)} ready wardrobe items."
+            f"{reason_text} Usable items must be ready, not archived, not marked as needing wash, "
+            "have a known type, and not be excluded by filters/preferences."
+        )
+
     async def _get_recently_worn_dates(self, user: User) -> dict[UUID, date]:
         result = await self.db.execute(
             select(ClothingItem.id, ClothingItem.last_worn_at).where(
@@ -147,34 +202,65 @@ class RecommendationService:
     async def _get_recently_worn_outfit_combinations(
         self, user: User, days: int = 7
     ) -> set[frozenset[UUID]]:
+        return await self._get_recent_outfit_combinations(
+            user=user,
+            days=days,
+            status_values=None,
+            require_worn_feedback=True,
+        )
+
+    async def _get_recent_generated_outfit_combinations(
+        self, user: User, days: int = 14, limit: int = 12
+    ) -> set[frozenset[UUID]]:
+        return await self._get_recent_outfit_combinations(
+            user=user,
+            days=days,
+            status_values={OutfitStatus.pending, OutfitStatus.accepted, OutfitStatus.viewed},
+            require_worn_feedback=False,
+            source_values={OutfitSource.on_demand, OutfitSource.scheduled},
+            limit=limit,
+        )
+
+    async def _get_recent_outfit_combinations(
+        self,
+        user: User,
+        days: int,
+        status_values: set[OutfitStatus] | None = None,
+        require_worn_feedback: bool = False,
+        source_values: set[OutfitSource] | None = None,
+        limit: int | None = None,
+    ) -> set[frozenset[UUID]]:
         if days <= 0:
             return set()
 
         user_today = get_user_today(user)
         cutoff_date = user_today - timedelta(days=days)
 
-        query = (
-            select(Outfit)
-            .join(UserFeedback, Outfit.id == UserFeedback.outfit_id)
-            .where(
-                and_(
-                    Outfit.user_id == user.id,
-                    UserFeedback.worn_at >= cutoff_date,
-                )
+        query = select(Outfit).where(Outfit.user_id == user.id).options(selectinload(Outfit.items))
+        if require_worn_feedback:
+            query = query.join(UserFeedback, Outfit.id == UserFeedback.outfit_id).where(
+                UserFeedback.worn_at >= cutoff_date
             )
-            .options(selectinload(Outfit.items))
-        )
+        else:
+            query = query.where(Outfit.scheduled_for >= cutoff_date)
+        if status_values:
+            query = query.where(Outfit.status.in_(status_values))
+        if source_values:
+            query = query.where(Outfit.source.in_(source_values))
+        query = query.order_by(Outfit.created_at.desc())
+        if limit:
+            query = query.limit(limit)
 
         result = await self.db.execute(query)
-        worn_outfits = list(result.scalars().all())
+        outfits = list(result.scalars().unique().all())
 
         combinations = set()
-        for outfit in worn_outfits:
+        for outfit in outfits:
             item_ids = frozenset(outfit_item.item_id for outfit_item in outfit.items)
             if len(item_ids) >= 2:
                 combinations.add(item_ids)
 
-        logger.info(f"Found {len(combinations)} worn outfit combinations in last {days} days")
+        logger.info(f"Found {len(combinations)} recent outfit combinations in last {days} days")
         return combinations
 
     def _format_items_for_prompt(
@@ -288,8 +374,19 @@ class RecommendationService:
         number_map: dict[int, UUID] | None = None,
         occasion: str | None = None,
         body_measurements: dict | None = None,
+        gender: str | None = None,
+        user_request: str | None = None,
+        recent_generated_combinations: set[frozenset[UUID]] | None = None,
+        excluded_combinations: list[list[UUID]] | None = None,
     ) -> str:
         lines = []
+
+        if user_request and user_request.strip():
+            lines.append(f"- CURRENT USER REQUEST: {user_request.strip()}")
+
+        if gender:
+            display_gender = gender.replace("_", " ")
+            lines.append(f"- Gender identity for fit and styling context: {display_gender}")
 
         if body_measurements:
             m = body_measurements
@@ -381,6 +478,32 @@ class RecommendationService:
                     f"- Recently worn outfits (prefer variety, only repeat if necessary): {', '.join(worn_sets)}"
                 )
 
+        if recent_generated_combinations and number_map:
+            uuid_to_number = {uuid: num for num, uuid in number_map.items()}
+            generated_sets = []
+            for combo in recent_generated_combinations:
+                numbers = sorted([uuid_to_number[uuid] for uuid in combo if uuid in uuid_to_number])
+                if numbers:
+                    generated_sets.append("[" + ", ".join(map(str, numbers)) + "]")
+            if generated_sets:
+                lines.append(
+                    f"- Recently suggested outfits (avoid repeating the same combo unless no viable alternative exists): {', '.join(generated_sets)}"
+                )
+
+        if excluded_combinations and number_map:
+            uuid_to_number = {uuid: num for num, uuid in number_map.items()}
+            excluded_sets = []
+            for combo in excluded_combinations:
+                numbers = sorted([uuid_to_number[uuid] for uuid in combo if uuid in uuid_to_number])
+                if numbers:
+                    excluded_sets.append("[" + ", ".join(map(str, numbers)) + "]")
+            if excluded_sets:
+                lines.append(
+                    "- Do not repeat these already shown outfit combinations in this session: "
+                    f"{', '.join(excluded_sets)}. Pick a materially different combo using different core clothing "
+                    "slots; if no reasonable alternative exists, the service will explain that to the user."
+                )
+
         if lines:
             return "\nUSER PREFERENCES:\n" + "\n".join(lines)
         return ""
@@ -454,6 +577,213 @@ class RecommendationService:
             good_pairs[pair.item2_id].append(pair.item1_id)
 
         return good_pairs
+
+    def _language_instruction(self, language: str | None) -> str:
+        return (
+            "\nLANGUAGE REQUIREMENT:\n"
+            "- Generate suggestion copy in BOTH English and Simplified Chinese in localized_text.\n"
+            "- localized_text.en must contain natural English headline, highlights, and styling_tip.\n"
+            "- localized_text.zh must contain natural Simplified Chinese headline, highlights, and styling_tip.\n"
+            "- For backward compatibility also set top-level headline, highlights, and styling_tip to the requested current language "
+            f"({'Simplified Chinese' if language == 'zh' else 'English'}).\n"
+            "- Do not show both languages at the same time in any one text field; keep them separated under en and zh.\n"
+            "- Keep JSON keys exactly in English.\n"
+        )
+
+    def _normalize_localized_text(self, outfit_data: dict, language: str | None = "en") -> dict:
+        localized = outfit_data.get("localized_text")
+        if not isinstance(localized, dict):
+            localized = {}
+
+        def clean_variant(raw: object) -> dict:
+            variant = raw if isinstance(raw, dict) else {}
+            headline = variant.get("headline") if isinstance(variant.get("headline"), str) else None
+            highlights = variant.get("highlights")
+            if not isinstance(highlights, list):
+                highlights = None
+            else:
+                highlights = [str(item) for item in highlights if isinstance(item, (str, int, float))]
+            styling_tip = variant.get("styling_tip") if isinstance(variant.get("styling_tip"), str) else None
+            return {
+                "headline": headline,
+                "highlights": highlights,
+                "styling_tip": styling_tip,
+            }
+
+        en = clean_variant(localized.get("en"))
+        zh = clean_variant(localized.get("zh"))
+
+        top_headline = outfit_data.get("headline") or outfit_data.get("reasoning")
+        top_highlights = outfit_data.get("highlights")
+        top_tip = outfit_data.get("styling_tip") or outfit_data.get("style_notes")
+        current_key = "zh" if language == "zh" else "en"
+        current = zh if current_key == "zh" else en
+        fallback = en if current_key == "zh" else zh
+
+        current["headline"] = current["headline"] or top_headline
+        current["highlights"] = current["highlights"] or (top_highlights if isinstance(top_highlights, list) else [])
+        current["styling_tip"] = current["styling_tip"] or top_tip
+        fallback["headline"] = fallback["headline"] or current["headline"]
+        fallback["highlights"] = fallback["highlights"] or current["highlights"]
+        fallback["styling_tip"] = fallback["styling_tip"] or current["styling_tip"]
+
+        outfit_data["localized_text"] = {"en": en, "zh": zh}
+        return outfit_data["localized_text"]
+
+    def _body_measurements_summary(self, user: User) -> str:
+        measurements = getattr(user, "body_measurements", None) or {}
+        gender = getattr(user, "gender", None)
+        parts = []
+        if gender:
+            parts.append(f"gender identity {gender.replace('_', ' ')}")
+        if not measurements:
+            return ", ".join(parts) if parts else "No saved body measurements; use an average adult model silhouette."
+
+        units = {
+            "height": "cm",
+            "weight": "kg",
+            "chest": "cm",
+            "waist": "cm",
+            "hips": "cm",
+            "inseam": "cm",
+        }
+        for key in ["height", "weight", "chest", "waist", "hips", "inseam"]:
+            if measurements.get(key):
+                parts.append(f"{key} {measurements[key]}{units[key]}")
+        for key in ["shirt_size", "pants_size", "shoe_size"]:
+            if measurements.get(key):
+                parts.append(f"{key.replace('_', ' ')} {measurements[key]}")
+        return ", ".join(parts) if parts else "No saved body measurements; use an average adult model silhouette."
+
+    def _build_try_on_prompt(
+        self,
+        user: User,
+        items: list[ClothingItem],
+        outfit_data: dict,
+        occasion: str,
+        language: str | None,
+    ) -> str:
+        item_lines = []
+        for item in items:
+            desc = ", ".join(
+                part
+                for part in [
+                    item.name,
+                    item.subtype or item.type,
+                    item.primary_color,
+                    item.material,
+                    item.brand,
+                ]
+                if part
+            )
+            item_lines.append(f"- {desc or item.type}")
+        language_name = "Chinese" if language == "zh" else "English"
+        gender = (getattr(user, "gender", None) or "").replace("_", " ").lower()
+        if gender == "female":
+            model_identity = (
+                "Render a female adult model with a feminine body silhouette and proportions matching the saved measurements. "
+                "Do not render a male or masculine body. Hair should not be used to express gender because the image is cropped at the neck. "
+            )
+        elif gender == "male":
+            model_identity = (
+                "Render a male adult model with a masculine body silhouette and proportions matching the saved measurements. "
+                "Do not render a female or feminine body. Hair should not be used to express gender because the image is cropped at the neck. "
+            )
+        elif gender:
+            model_identity = (
+                f"Render an adult model whose body silhouette reflects the user's {gender} gender identity and saved measurements. "
+                "Hair should not be used to express gender because the image is cropped at the neck. "
+            )
+        else:
+            model_identity = "Render an anonymous adult model with proportions matching the saved measurements. "
+        return (
+            "Create one realistic fashion try-on image for this suggested outfit. "
+            "Show the same anonymous adult model wearing all listed wardrobe items. "
+            + model_identity
+            + "The final picture must include TWO body-only views side by side: front and back views (front view and back view). "
+            "Both views must be full outfit crops from neck to shoes: start at the base of the neck, continue through the torso and legs, and include the complete shoes with feet fully visible. "
+            "Do not show the model's head; crop above the neck in both views, with no face, no facial features, no portrait framing, and no visible hair. "
+            "Layer garments in a physically plausible order: shells, windbreakers, outdoor jackets, parkas, and coats are outermost; "
+            "never place a jacket or shell underneath a cardigan, sweater, or long rope knit. "
+            "Use a neutral studio background, realistic fabric, natural proportions, and preserve the garments' "
+            "colors, textures, shapes, and visible details from the reference photos. Do not add extra clothing.\n\n"
+            f"User body measurements for model proportions: {self._body_measurements_summary(user)}.\n"
+            f"Occasion: {occasion}.\n"
+            f"Outfit title: {outfit_data.get('headline') or outfit_data.get('reasoning') or 'Suggested outfit'}.\n"
+            f"Items to combine:\n" + "\n".join(item_lines) + "\n\n"
+            f"If any small labels/captions appear, use {language_name}; otherwise return only the image."
+        )
+
+    def _image_part_for_prompt(self, path: Path) -> dict:
+        mime = mimetypes.guess_type(path.name)[0] or "image/jpeg"
+        image_b64 = base64.b64encode(path.read_bytes()).decode("utf-8")
+        return {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{image_b64}"}}
+
+    def _extract_image_bytes(self, message: dict) -> bytes:
+        images = message.get("images") or []
+        if not images:
+            raise RuntimeError(f"NVHub image model returned no image: {message}")
+        url = images[0].get("image_url", {}).get("url") or images[0].get("url")
+        if not url or not url.startswith("data:"):
+            raise RuntimeError("NVHub image model returned an unsupported image payload")
+        return base64.b64decode(url.split(",", 1)[1])
+
+    async def _generate_try_on_image(
+        self,
+        user: User,
+        outfit_data: dict,
+        items: list[ClothingItem],
+        occasion: str,
+        language: str | None,
+    ) -> str | None:
+        settings = get_settings()
+        if not settings.ai_api_key:
+            logger.warning("Skipping try-on image: AI_API_KEY is not configured")
+            return None
+
+        storage = Path(settings.storage_path)
+        references = []
+        for item in items[:8]:
+            rel = item.medium_path or item.image_path or item.thumbnail_path
+            if not rel:
+                continue
+            full = storage / rel
+            if full.exists():
+                references.append((item, full))
+
+        if not references:
+            logger.warning("Skipping try-on image: no local item reference images found")
+            return None
+
+        content = [{"type": "text", "text": self._build_try_on_prompt(user, items, outfit_data, occasion, language)}]
+        for index, (item, full) in enumerate(references, 1):
+            content.append({"type": "text", "text": f"Reference garment {index}: {item.name or item.type}. Preserve this garment's visual design."})
+            content.append(self._image_part_for_prompt(full))
+
+        model = settings.bg_removal_model or "gcp/google/gemini-3-pro-image-preview"
+        payload = {"model": model, "messages": [{"role": "user", "content": content}]}
+        headers = {"Authorization": f"Bearer {settings.ai_api_key}", "Content-Type": "application/json"}
+
+        async with httpx.AsyncClient(timeout=240, follow_redirects=True) as client:
+            response = await client.post(
+                f"{str(settings.ai_base_url).rstrip('/')}/chat/completions",
+                headers=headers,
+                json=payload,
+            )
+            response.raise_for_status()
+
+        data = response.json()
+        message = data["choices"][0]["message"]
+        image_bytes = self._extract_image_bytes(message)
+
+        out_dir = storage / str(user.id) / "outfit_tryons"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}_{outfit_data.get('headline', 'tryon')[:12].lower().replace(' ', '_')}.png"
+        # keep filename conservative for filesystem/signed URL path usage
+        filename = re.sub(r"[^a-z0-9_\-.]", "", filename) or "tryon.png"
+        out_path = out_dir / filename
+        out_path.write_bytes(image_bytes)
+        return f"{user.id}/outfit_tryons/{filename}"
 
     def _parse_ai_response(self, content: str) -> dict:
         def strip_comments(json_str: str) -> str:
@@ -549,6 +879,8 @@ class RecommendationService:
         source: OutfitSource,
         number_map: dict[int, UUID],
         scheduled_date: date | None = None,
+        language: str | None = "en",
+        excluded_combinations: list[list[UUID]] | None = None,
     ) -> Outfit:
         selected_numbers = outfit_data.get("items", [])
         valid_ids = []
@@ -580,6 +912,45 @@ class RecommendationService:
         )
         item_type_map = {row.id: (row.type or "").lower() for row in items_result}
         valid_ids = deduplicate_by_body_slot(valid_ids, item_type_map)
+
+        if excluded_combinations:
+            selected_combo = frozenset(valid_ids)
+            excluded_combo_sets = {
+                frozenset(combo) for combo in excluded_combinations if len(combo) >= 2
+            }
+            if selected_combo in excluded_combo_sets:
+                raise AIRecommendationError(
+                    "I cannot make a good suggestion without repeating an outfit combo already shown for this scenario. "
+                    "Try loosening the filters, changing the occasion/weather preference, marking some items washable/ready, "
+                    "or add more ready wardrobe items such as another compatible top, bottom, or shoes."
+                )
+
+        selected_items_result = await self.db.execute(
+            select(ClothingItem).where(ClothingItem.id.in_(valid_ids))
+        )
+        selected_items_by_id = {item.id: item for item in selected_items_result.scalars().all()}
+        selected_items = [selected_items_by_id[item_id] for item_id in valid_ids if item_id in selected_items_by_id]
+
+        if "try_on_image_path" not in outfit_data:
+            try:
+                try_on_path = await self._generate_try_on_image(
+                    user=user,
+                    outfit_data=outfit_data,
+                    items=selected_items,
+                    occasion=occasion,
+                    language=language,
+                )
+                if try_on_path:
+                    outfit_data["try_on_image_path"] = try_on_path
+                    outfit_data["_image_model"] = get_settings().bg_removal_model
+            except Exception as exc:
+                logger.warning("Try-on image generation failed; continuing without image: %s", exc)
+
+        localized = self._normalize_localized_text(outfit_data, language)
+        current_text = localized["zh" if language == "zh" else "en"]
+        outfit_data["headline"] = current_text.get("headline") or outfit_data.get("headline") or outfit_data.get("reasoning")
+        outfit_data["highlights"] = current_text.get("highlights") or outfit_data.get("highlights") or []
+        outfit_data["styling_tip"] = current_text.get("styling_tip") or outfit_data.get("styling_tip") or outfit_data.get("style_notes")
 
         reasoning = outfit_data.get("headline") or outfit_data.get("reasoning")
         style_notes = outfit_data.get("styling_tip") or outfit_data.get("style_notes")
@@ -632,6 +1003,188 @@ class RecommendationService:
         logger.info(f"Created outfit {outfit.id} with {len(valid_ids)} items")
         return outfit
 
+
+    async def _get_weather_for_context(
+        self, user: User, weather_override: WeatherData | None = None
+    ) -> WeatherData:
+        if weather_override:
+            return weather_override
+
+        lat = float(user.location_lat) if user.location_lat is not None else None
+        lon = float(user.location_lon) if user.location_lon is not None else None
+
+        # Fall back to geocoding a named location when coordinates are unset (#75).
+        if (lat is None and lon is None) and user.location_name:
+            try:
+                geocoded = await self.weather_service.geocode_location_name(user.location_name)
+            except GeocodingServiceError as e:
+                logger.error(f"Geocoding failed for outfit generation: {e}")
+                raise ValueError(
+                    "Could not resolve location. Please update your location in settings."
+                ) from e
+            if geocoded:
+                lat, lon, _ = geocoded
+
+        if lat is None or lon is None:
+            raise ValueError("User location not set. Please set location in settings.")
+        try:
+            return await self.weather_service.get_current_weather(lat, lon)
+        except WeatherServiceError as e:
+            logger.error(f"Weather service failed: {e}")
+            raise ValueError(
+                "Could not fetch weather data. Please try again or provide weather manually."
+            ) from e
+
+    async def suggest_existing_outfit(
+        self,
+        user: User,
+        occasion: str,
+        weather_override: WeatherData | None = None,
+        time_of_day: str | None = None,
+        user_request: str | None = None,
+    ) -> Outfit:
+        weather = await self._get_weather_for_context(user, weather_override)
+        if not time_of_day:
+            time_of_day = get_time_of_day(user)
+
+        ranked = await self._rank_existing_outfits(user, occasion, weather)
+        if not ranked:
+            raise ValueError("No existing outfits found. Generate an AI outfit first or save looks to your lookbook.")
+
+        selected = ranked[0]
+        selected.weather_data = weather.to_dict()
+        selected.scheduled_for = get_user_today(user)
+        selected.status = OutfitStatus.pending
+        selected.source = OutfitSource.on_demand
+        selected.reasoning = (
+            f"Best saved outfit for {occasion} in {round(weather.temperature)}°C {weather.condition} weather."
+        )
+        selected.style_notes = (
+            f"Chosen from your existing outfits because it best matches the current scenario, weather, and {time_of_day} timing."
+        )
+        if user_request and user_request.strip():
+            selected.style_notes += f" Preference considered: {user_request.strip()}"
+        raw = dict(selected.ai_raw_response or {})
+        raw.setdefault("highlights", [
+            f"Matches the {occasion} scenario.",
+            f"Weather fit: {round(weather.temperature)}°C and {weather.condition}.",
+            f"Good timing for {time_of_day}.",
+        ])
+        selected.ai_raw_response = raw
+        await self.db.commit()
+        await self.db.refresh(selected)
+
+        refreshed = await self.db.execute(
+            select(Outfit)
+            .where(Outfit.id == selected.id)
+            .options(
+                selectinload(Outfit.items).selectinload(OutfitItem.item),
+                selectinload(Outfit.feedback),
+                selectinload(Outfit.family_ratings).selectinload(FamilyOutfitRating.user),
+            )
+        )
+        return refreshed.scalar_one()
+
+    async def auto_suggest_outfits(
+        self,
+        user: User,
+        occasion: str,
+        weather_override: WeatherData | None = None,
+        time_of_day: str | None = None,
+        language: str | None = "en",
+        user_request: str | None = None,
+        excluded_combinations: list[list[UUID]] | None = None,
+        force_generate: bool = False,
+    ) -> dict:
+        weather = await self._get_weather_for_context(user, weather_override)
+        if not time_of_day:
+            time_of_day = get_time_of_day(user)
+
+        if not force_generate and not user_request:
+            excluded_combo_sets = {
+                frozenset(combo) for combo in (excluded_combinations or []) if len(combo) >= 2
+            }
+            existing = await self._rank_existing_outfits(user, occasion, weather, min_score=50.0, limit=80)
+            if excluded_combo_sets:
+                existing = [
+                    outfit
+                    for outfit in existing
+                    if frozenset(outfit_item.item_id for outfit_item in (outfit.items or [])) not in excluded_combo_sets
+                ]
+            existing = existing[:6]
+            if existing:
+                return {"mode": "existing", "outfits": existing, "generated": False}
+
+        generated = await self.generate_recommendation(
+            user=user,
+            occasion=occasion,
+            weather_override=weather,
+            time_of_day=time_of_day,
+            language=language,
+            user_request=user_request,
+            excluded_combinations=excluded_combinations,
+        )
+        return {"mode": "generated", "outfits": [generated], "generated": True}
+
+    async def _rank_existing_outfits(
+        self,
+        user: User,
+        occasion: str,
+        weather: WeatherData,
+        min_score: float | None = None,
+        limit: int = 80,
+    ) -> list[Outfit]:
+        result = await self.db.execute(
+            select(Outfit)
+            .where(
+                and_(
+                    Outfit.user_id == user.id,
+                    Outfit.status != OutfitStatus.rejected,
+                )
+            )
+            .options(
+                selectinload(Outfit.items).selectinload(OutfitItem.item),
+                selectinload(Outfit.feedback),
+                selectinload(Outfit.family_ratings).selectinload(FamilyOutfitRating.user),
+            )
+            .order_by(Outfit.created_at.desc())
+            .limit(limit)
+        )
+        outfits = list(result.scalars().unique().all())
+        if not outfits:
+            return []
+
+        def score(outfit: Outfit) -> float:
+            score_value = 0.0
+            if outfit.occasion == occasion:
+                score_value += 40
+            elif occasion in {"casual", "weekend"} and outfit.occasion in {"casual", "weekend", "outdoor", "travel"}:
+                score_value += 18
+            elif occasion in {"office", "work", "business-casual"} and outfit.occasion in {"office", "work", "smart-casual", "business-casual"}:
+                score_value += 18
+            if outfit.scheduled_for is None:
+                score_value += 12
+            if outfit.feedback and outfit.feedback.rating:
+                score_value += outfit.feedback.rating * 4
+            if outfit.status == OutfitStatus.accepted:
+                score_value += 8
+            weather_data = outfit.weather_data or {}
+            old_temp = weather_data.get("temperature")
+            if isinstance(old_temp, (int, float)):
+                score_value += max(0.0, 20.0 - abs(float(old_temp) - float(weather.temperature)))
+            condition = str(weather_data.get("condition", "")).lower()
+            if condition and condition in weather.condition.lower():
+                score_value += 8
+            item_count = len(outfit.items or [])
+            if item_count >= 2:
+                score_value += min(item_count, 5)
+            return score_value
+
+        ranked = sorted(((score(outfit), outfit) for outfit in outfits), key=lambda pair: pair[0], reverse=True)
+        if min_score is not None:
+            ranked = [pair for pair in ranked if pair[0] >= min_score]
+        return [outfit for _, outfit in ranked[:limit]]
+
     async def generate_recommendation(
         self,
         user: User,
@@ -643,18 +1196,23 @@ class RecommendationService:
         time_of_day: str | None = None,
         single_outfit: bool = False,
         scheduled_date: date | None = None,
+        language: str | None = "en",
+        user_request: str | None = None,
+        excluded_combinations: list[list[UUID]] | None = None,
     ) -> Outfit:
         # Guard first so deferral is unconditional, before any location/weather work.
         require_internal_ai("text")
 
         exclude_items = exclude_items or []
         include_items = include_items or []
+        user_request = user_request.strip() if user_request and user_request.strip() else None
 
         if not time_of_day:
             time_of_day = get_time_of_day(user)
 
-        # Determine cache eligibility before auto-merge
-        use_cache = not exclude_items and not include_items and not single_outfit
+        # Determine cache eligibility before auto-merge. Free-text preference/refinement
+        # requests must not reuse or populate the generic suggestion cache.
+        use_cache = not exclude_items and not include_items and not single_outfit and not user_request and not excluded_combinations
 
         # Auto-exclude today's rejected items for this occasion
         rejected_ids = await self._get_today_rejected_item_ids(user, occasion)
@@ -662,32 +1220,8 @@ class RecommendationService:
             exclude_items = list(set(exclude_items) | rejected_ids)
             logger.info(f"Auto-excluding {len(rejected_ids)} rejected items for user {user.id}")
 
-        if weather_override:
-            weather = weather_override
-        else:
-            lat = float(user.location_lat) if user.location_lat is not None else None
-            lon = float(user.location_lon) if user.location_lon is not None else None
-
-            if (lat is None and lon is None) and user.location_name:
-                try:
-                    geocoded = await self.weather_service.geocode_location_name(user.location_name)
-                except GeocodingServiceError as e:
-                    logger.error(f"Geocoding failed for outfit generation: {e}")
-                    raise ValueError(
-                        "Could not resolve location. Please update your location in settings."
-                    ) from e
-                if geocoded:
-                    lat, lon, _ = geocoded
-
-            if lat is None or lon is None:
-                raise ValueError("User location not set. Please set location in settings.")
-            try:
-                weather = await self.weather_service.get_current_weather(lat, lon)
-            except WeatherServiceError as e:
-                logger.error(f"Weather service failed: {e}")
-                raise ValueError(
-                    "Could not fetch weather data. Please try again or provide weather manually."
-                ) from e
+        # Get weather (geocoding fallback handled inside the helper)
+        weather = await self._get_weather_for_context(user, weather_override)
 
         preferences = user.preferences
 
@@ -727,14 +1261,18 @@ class RecommendationService:
                 logger.info(f"Force-included {len(forced_items)} items in recommendation")
 
         if len(candidates) < 2:
+            diagnostics = await self.get_candidate_item_diagnostics(
+                user=user,
+                preferences=preferences,
+                exclude_items=exclude_items,
+            )
             raise InsufficientWardrobeError(
-                "Not enough items in wardrobe for recommendation. "
-                "Please add more items or adjust filters."
+                self._insufficient_wardrobe_message(len(candidates), diagnostics)
             )
 
         # Check cache for pre-generated suggestions
         if use_cache:
-            cached = await pop_suggestion(user.id, occasion)
+            cached = await pop_suggestion(user.id, occasion, language=language)
             if cached:
                 cached_number_map = cached.get("_number_map", {})
                 number_map = {int(k): UUID(v) for k, v in cached_number_map.items()}
@@ -757,6 +1295,7 @@ class RecommendationService:
                         source,
                         number_map,
                         scheduled_date=scheduled_date,
+                        language=language,
                     )
 
         # Fetch scoring context
@@ -790,6 +1329,7 @@ class RecommendationService:
         mandatory_items_section = self._format_mandatory_items_section(include_items, number_map)
 
         worn_combinations = await self._get_recently_worn_outfit_combinations(user, days=7)
+        recent_generated_combinations = await self._get_recent_generated_outfit_combinations(user, days=14)
 
         preferences_text = self._format_preferences_for_prompt(
             preferences,
@@ -798,6 +1338,10 @@ class RecommendationService:
             number_map,
             occasion=occasion,
             body_measurements=getattr(user, "body_measurements", None),
+            gender=getattr(user, "gender", None),
+            user_request=user_request,
+            recent_generated_combinations=recent_generated_combinations,
+            excluded_combinations=excluded_combinations,
         )
 
         prompt = RECOMMENDATION_PROMPT.format(
@@ -807,7 +1351,7 @@ class RecommendationService:
             feels_like=weather.feels_like,
             condition=weather.condition,
             precipitation_chance=weather.precipitation_chance,
-            preferences_text=preferences_text,
+            preferences_text=preferences_text + self._language_instruction(language),
             items_text=items_text,
             mandatory_items_section=mandatory_items_section,
         )
@@ -841,6 +1385,7 @@ class RecommendationService:
                     raise ValueError(f"Expected dict, got {type(outfit_data)}")
                 outfit_data["_ai_model"] = result.model
                 outfit_data["_ai_endpoint"] = result.endpoint
+                outfit_data["_debug_prompt"] = prompt
                 return await self._materialize_outfit(
                     outfit_data,
                     user,
@@ -849,6 +1394,8 @@ class RecommendationService:
                     source,
                     number_map,
                     scheduled_date=scheduled_date,
+                    language=language,
+                    excluded_combinations=excluded_combinations,
                 )
 
             # Multi-outfit parse
@@ -857,6 +1404,7 @@ class RecommendationService:
             first = outfit_list[0]
             first["_ai_model"] = result.model
             first["_ai_endpoint"] = result.endpoint
+            first["_debug_prompt"] = prompt
 
             outfit = await self._materialize_outfit(
                 first,
@@ -866,18 +1414,21 @@ class RecommendationService:
                 source,
                 number_map,
                 scheduled_date=scheduled_date,
+                language=language,
+                excluded_combinations=excluded_combinations,
             )
 
-            # Cache remaining outfits for "Try Another"
-            if len(outfit_list) > 1:
+            # Cache remaining outfits for "Try Another" only for generic suggestions.
+            if use_cache and len(outfit_list) > 1:
                 serializable_map = {str(k): str(v) for k, v in number_map.items()}
                 to_cache = []
                 for od in outfit_list[1:]:
                     od["_number_map"] = serializable_map
                     od["_ai_model"] = result.model
                     od["_ai_endpoint"] = result.endpoint
+                    od["_debug_prompt"] = prompt
                     to_cache.append(od)
-                await push_suggestions(user.id, occasion, to_cache)
+                await push_suggestions(user.id, occasion, to_cache, language=language)
                 logger.info(f"Cached {len(to_cache)} additional suggestions for user {user.id}")
 
             return outfit

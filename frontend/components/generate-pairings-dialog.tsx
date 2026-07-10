@@ -18,6 +18,7 @@ import { useGeneratePairings } from '@/lib/hooks/use-pairings';
 import { Item, Pairing } from '@/lib/types';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
+import { useAiTasks } from '@/lib/ai-task-context';
 
 interface GeneratePairingsDialogProps {
   item: Item | null;
@@ -36,15 +37,23 @@ export function GeneratePairingsDialog({
   const [generatedPairings, setGeneratedPairings] = useState<Pairing[] | null>(null);
   const generatePairings = useGeneratePairings();
   const router = useRouter();
+  const { activeTask, startTask } = useAiTasks();
+  const generatingPairings = activeTask?.type === 'pairing-generation';
 
   const handleGenerate = async () => {
     if (!item) return;
 
     try {
-      const result = await generatePairings.mutateAsync({
-        itemId: item.id,
-        numPairings,
-      });
+      const result = await startTask(
+        {
+          type: 'pairing-generation',
+          label: `Generating ${numPairings} AI outfit pairing${numPairings === 1 ? '' : 's'} for ${item.name || item.type}...`,
+        },
+        () => generatePairings.mutateAsync({
+          itemId: item.id,
+          numPairings,
+        })
+      );
       setGeneratedPairings(result.pairings);
       toast.success(`Generated ${result.generated} outfit${result.generated !== 1 ? 's' : ''}!`);
     } catch (error) {
@@ -178,9 +187,9 @@ export function GeneratePairingsDialog({
               </Button>
               <Button
                 onClick={handleGenerate}
-                disabled={generatePairings.isPending}
+                disabled={generatingPairings}
               >
-                {generatePairings.isPending ? (
+                {generatingPairings ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                     Generating...

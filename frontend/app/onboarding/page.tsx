@@ -11,6 +11,7 @@ import {
   MapPin,
   Palette,
   Camera,
+  Image as ImageIcon,
   ChevronRight,
   ChevronLeft,
   Check,
@@ -670,20 +671,42 @@ function UploadStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => void
               </Button>
             </div>
           ) : (
-            <label className="flex flex-col items-center justify-center w-full aspect-square border-2 border-dashed rounded-lg cursor-pointer hover:bg-muted/50 transition-colors">
-              <div className="flex flex-col items-center justify-center pt-5 pb-6">
+            <div className="space-y-3">
+              <div className="flex flex-col items-center justify-center w-full aspect-square border-2 border-dashed rounded-lg bg-muted/20 p-6 text-center">
                 <Camera className="w-12 h-12 text-muted-foreground mb-4" />
-                <p className="mb-2 text-sm font-medium">Click to upload or take photo</p>
-                <p className="text-xs text-muted-foreground">PNG, JPG, or HEIC</p>
+                <p className="mb-2 text-sm font-medium">Add a clothing photo</p>
+                <p className="text-xs text-muted-foreground">Choose from your library or take a new photo</p>
               </div>
-              <input
-                type="file"
-                className="hidden"
-                accept="image/*"
-                capture="environment"
-                onChange={handleFileChange}
-              />
-            </label>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="flex min-h-12 cursor-pointer items-center justify-center rounded-md border border-input bg-background px-4 py-3 text-sm font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground">
+                  <ImageIcon className="mr-2 h-4 w-4" />
+                  Choose from Library
+                  <input
+                    aria-label="Choose photo from library"
+                    type="file"
+                    className="hidden"
+                    accept="image/*"
+                    onChange={handleFileChange}
+                  />
+                </label>
+
+                <label className="flex min-h-12 cursor-pointer items-center justify-center rounded-md border border-input bg-background px-4 py-3 text-sm font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground">
+                  <Camera className="mr-2 h-4 w-4" />
+                  Take Photo
+                  <input
+                    aria-label="Take photo with camera"
+                    type="file"
+                    className="hidden"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={handleFileChange}
+                  />
+                </label>
+              </div>
+
+              <p className="text-center text-xs text-muted-foreground">PNG, JPG, WebP, HEIC, or HEIF</p>
+            </div>
           )}
 
           {file && (

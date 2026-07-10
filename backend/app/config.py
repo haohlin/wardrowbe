@@ -80,8 +80,8 @@ class Settings(BaseSettings):
     max_upload_size_mb: int = Field(default=10)
 
     # Background removal
-    bg_removal_provider: str = Field(default="rembg")  # "rembg" or "http"
-    bg_removal_model: str = Field(default="u2net")  # rembg model name
+    bg_removal_provider: str = Field(default="rembg")  # "rembg", "http", "local", or "nvhub"
+    bg_removal_model: str = Field(default="gcp/google/gemini-3-pro-image-preview")
     bg_removal_url: str | None = Field(default=None)  # URL for http provider (e.g. withoutbg)
     bg_removal_api_key: str | None = Field(default=None)  # API key for http provider
 

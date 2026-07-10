@@ -4,7 +4,7 @@ from io import BytesIO
 from pathlib import Path
 
 import imagehash
-from PIL import Image
+from PIL import Image, ImageOps
 
 from app.config import get_settings
 
@@ -27,6 +27,10 @@ ALLOWED_MIME_TYPES = {
     "image/webp",
     "image/heic",
     "image/heif",
+    "image/heic-sequence",
+    "image/heif-sequence",
+    # iOS/Chrome can sometimes send HEIC files with a generic MIME type.
+    "application/octet-stream",
 }
 
 
@@ -56,6 +60,10 @@ class ImageService:
             pass
 
         return Image.open(BytesIO(image_data))
+
+    def _normalize_orientation(self, image: Image.Image) -> Image.Image:
+        """Apply EXIF orientation once and strip the tag before saving derived JPEGs."""
+        return ImageOps.exif_transpose(image)
 
     def _resize_image(
         self,
@@ -108,6 +116,7 @@ class ImageService:
             image = self._convert_heic(image_data)
         else:
             image = Image.open(BytesIO(image_data))
+        image = self._normalize_orientation(image)
 
         # Generate base filename
         base_filename = self._generate_filename(".jpg")
@@ -161,10 +170,21 @@ class ImageService:
                 if full_path.exists():
                     full_path.unlink()
 
-    def validate_image(self, image_data: bytes, content_type: str) -> bool:
+    def validate_image(
+        self,
+        image_data: bytes,
+        content_type: str,
+        filename: str | None = None,
+    ) -> bool:
         """Validate image data and content type."""
-        # Check content type
-        if content_type not in ALLOWED_MIME_TYPES:
+        normalized_content_type = content_type.split(";", 1)[0].strip().lower()
+        ext = Path(filename or "").suffix.lower()
+
+        # Check content type. iOS/Chrome may upload HEIC as application/octet-stream,
+        # so allow it only when the extension is an image type we support.
+        if normalized_content_type not in ALLOWED_MIME_TYPES:
+            return False
+        if normalized_content_type == "application/octet-stream" and ext not in ALLOWED_EXTENSIONS:
             return False
 
         # Check file size (max 20MB)
@@ -173,7 +193,12 @@ class ImageService:
 
         # Try to open as image
         try:
-            if content_type in ("image/heic", "image/heif"):
+            if normalized_content_type in (
+                "image/heic",
+                "image/heif",
+                "image/heic-sequence",
+                "image/heif-sequence",
+            ) or ext in (".heic", ".heif"):
                 self._convert_heic(image_data)
             else:
                 Image.open(BytesIO(image_data))
@@ -193,6 +218,9 @@ class ImageService:
             image = self._convert_heic(image_data)
         else:
             image = Image.open(BytesIO(image_data))
+
+        # Compute perceptual hash on the same orientation users see after upload.
+        image = self._normalize_orientation(image)
 
         # Convert to RGB if needed for consistent hashing
         if image.mode != "RGB":
@@ -251,9 +279,19 @@ class ImageService:
         if not original_full.exists():
             raise ValueError(f"Image not found: {image_path}")
 
-        image = Image.open(original_full).convert("RGB")
+        image = self._normalize_orientation(Image.open(original_full)).convert("RGB")
         provider = get_provider()
-        result = provider.remove(image)
+        try:
+            result = provider.remove(image)
+        except Exception as exc:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Configured background-removal provider failed; using local fallback: %s", exc
+            )
+            from app.services.background_removal import SimpleLocalProvider
+
+            result = SimpleLocalProvider().remove(image)
 
         # Composite onto solid color background
         background = Image.new("RGBA", result.size, (*bg_color, 255))

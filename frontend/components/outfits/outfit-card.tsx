@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import {
   BookmarkCheck,
+  ImageIcon,
   Layers,
   RefreshCw,
   Shirt,
@@ -15,6 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import type { Outfit } from '@/lib/hooks/use-outfits';
+import { useI18n } from '@/lib/i18n';
 
 interface OutfitCardProps {
   outfit: Outfit;
@@ -65,8 +67,9 @@ function getSourceBadge(outfit: Outfit): {
   };
 }
 
-function getCardTitle(outfit: Outfit): string {
+function getCardTitle(outfit: Outfit, localizedHeadline?: string | null): string {
   if (outfit.name) return outfit.name;
+  if (localizedHeadline) return localizedHeadline;
   if (outfit.reasoning) return outfit.reasoning;
   if (outfit.highlights && outfit.highlights.length > 0) {
     return outfit.highlights[0];
@@ -88,9 +91,15 @@ function getMetaLabel(outfit: Outfit): string {
 }
 
 export function OutfitCard({ outfit, onClick }: OutfitCardProps) {
+  const { language } = useI18n();
+  const localizedText = outfit.localized_text?.[language === 'zh' ? 'zh' : 'en'] ?? null;
+  const localizedHighlights = localizedText?.highlights?.length ? localizedText.highlights : outfit.highlights;
+  const localizedHeadline = localizedText?.headline ?? null;
   const badge = getSourceBadge(outfit);
   const visibleItems = outfit.items.slice(0, 4);
   const overflow = outfit.items.length - visibleItems.length;
+  const title = getCardTitle(outfit, localizedHeadline);
+  const description = localizedHeadline || outfit.reasoning || (localizedHighlights && localizedHighlights.length > 0 ? localizedHighlights[0] : null);
 
   const content = (
     <Card
@@ -102,38 +111,49 @@ export function OutfitCard({ outfit, onClick }: OutfitCardProps) {
     >
       <CardContent className="p-0">
         <div className="relative aspect-[5/4] bg-muted">
-          <div className="absolute inset-0 grid grid-cols-4 gap-0.5 p-2">
-            {visibleItems.map((item, idx) => (
-              <div
-                key={`${item.id}-${idx}`}
-                className="relative rounded overflow-hidden bg-background"
-              >
-                {item.thumbnail_url || item.image_url ? (
-                  <Image
-                    src={(item.thumbnail_url || item.image_url)!}
-                    alt={item.name || item.type}
-                    fill
-                    className="object-cover"
-                    sizes="(max-width: 640px) 25vw, 15vw"
-                    loading="lazy"
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center">
-                    <span className="text-[10px] text-muted-foreground">
-                      {item.type}
-                    </span>
-                  </div>
-                )}
-              </div>
-            ))}
-            {overflow > 0 && (
-              <div className="relative rounded overflow-hidden bg-background flex items-center justify-center">
-                <span className="text-sm font-medium text-muted-foreground">
-                  +{overflow}
-                </span>
-              </div>
-            )}
-          </div>
+          {outfit.try_on_image_url ? (
+            <Image
+              src={outfit.try_on_image_url}
+              alt={`AI try-on preview for ${title}`}
+              fill
+              className="object-cover"
+              sizes="(max-width: 640px) 100vw, 33vw"
+              loading="lazy"
+            />
+          ) : (
+            <div className="absolute inset-0 grid grid-cols-4 gap-0.5 p-2">
+              {visibleItems.map((item, idx) => (
+                <div
+                  key={`${item.id}-${idx}`}
+                  className="relative rounded overflow-hidden bg-background"
+                >
+                  {item.thumbnail_url || item.image_url ? (
+                    <Image
+                      src={(item.thumbnail_url || item.image_url)!}
+                      alt={item.name || item.type}
+                      fill
+                      className="object-cover"
+                      sizes="(max-width: 640px) 25vw, 15vw"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <span className="text-[10px] text-muted-foreground">
+                        {item.type}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              ))}
+              {overflow > 0 && (
+                <div className="relative rounded overflow-hidden bg-background flex items-center justify-center">
+                  <span className="text-sm font-medium text-muted-foreground">
+                    +{overflow}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
           {badge && (
             <div
               className={cn(
@@ -147,9 +167,28 @@ export function OutfitCard({ outfit, onClick }: OutfitCardProps) {
           )}
         </div>
         <div className="p-3 space-y-1">
-          <h3 className="text-sm font-semibold leading-tight truncate">
-            {getCardTitle(outfit)}
-          </h3>
+          <div className="flex items-start justify-between gap-2">
+            <h3 className="text-sm font-semibold leading-tight truncate">
+              {title}
+            </h3>
+            {outfit.try_on_image_url && (
+              <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground shrink-0">
+                <ImageIcon className="h-3 w-3" /> Try-on
+              </span>
+            )}
+          </div>
+          {description && (
+            <p data-i18n-skip="true" className="text-xs text-muted-foreground line-clamp-2">
+              {description}
+            </p>
+          )}
+          {localizedHighlights && localizedHighlights.length > 0 && (
+            <ul className="space-y-0.5 text-xs text-muted-foreground">
+              {localizedHighlights.slice(0, 2).map((highlight, index) => (
+                <li key={index} data-i18n-skip="true" className="line-clamp-1">• {highlight}</li>
+              ))}
+            </ul>
+          )}
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <Badge variant="outline" className="capitalize">
               {outfit.occasion}

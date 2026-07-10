@@ -13,6 +13,32 @@ from app.workers.db import get_db_session
 logger = logging.getLogger(__name__)
 
 
+def _compact_label(parts: list[str | None]) -> str | None:
+    """Join non-empty label parts without duplicating adjacent words."""
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        value = (part or "").strip()
+        if not value:
+            continue
+        key = value.lower()
+        if key in seen:
+            continue
+        cleaned.append(value)
+        seen.add(key)
+    return " ".join(cleaned) or None
+
+
+def _suggest_item_name(tags: ClothingTags) -> str | None:
+    """Build a concise editable item name from AI tags."""
+    if tags.ai_name:
+        return tags.ai_name.strip()
+    garment = _compact_label([tags.subtype, tags.type if tags.type != "unknown" else None])
+    if not garment:
+        return None
+    return _compact_label([tags.brand, tags.pattern, garment])
+
+
 def tags_to_item_fields(tags: ClothingTags, raw_response: str | None = None) -> dict[str, Any]:
     """Convert ClothingTags to item database fields."""
     # Build the tags JSONB object for frontend display
@@ -35,6 +61,9 @@ def tags_to_item_fields(tags: ClothingTags, raw_response: str | None = None) -> 
     fields = {
         "type": tags.type,
         "subtype": tags.subtype,
+        "name": _suggest_item_name(tags),
+        "brand": tags.brand,
+        "notes": tags.description,
         "primary_color": tags.primary_color,
         "colors": tags.colors,
         "pattern": tags.pattern,
@@ -157,7 +186,10 @@ async def tag_item_image(ctx: dict, item_id: str, image_path: str) -> dict[str, 
             ai_fields = tags_to_item_fields(tags, tags.raw_response)
 
             for field, value in ai_fields.items():
-                # Always update AI metadata fields (including tags JSONB and description)
+                # Always update AI/system fields and AI-derived edit fields during
+                # explicit analysis/re-analysis. This matches the button label:
+                # running AI Analyze should refresh name/type/brand/color/notes
+                # from the image, not leave stale user/default values behind.
                 if field in (
                     "ai_processed",
                     "ai_confidence",
@@ -165,28 +197,20 @@ async def tag_item_image(ctx: dict, item_id: str, image_path: str) -> dict[str, 
                     "ai_raw_response",
                     "tags",
                     "ai_description",
+                    "name",
+                    "type",
+                    "subtype",
+                    "brand",
+                    "primary_color",
+                    "notes",
+                    "colors",
+                    "pattern",
+                    "material",
+                    "style",
+                    "formality",
+                    "season",
                 ):
                     setattr(item, field, value)
-                # Only update content fields if user hasn't set them (or they're default/unknown)
-                elif field == "type":
-                    if not item.type or item.type == "unknown":
-                        setattr(item, field, value)
-                elif field == "subtype":
-                    if not item.subtype:
-                        setattr(item, field, value)
-                elif field == "primary_color":
-                    if not item.primary_color or item.primary_color == "unknown":
-                        setattr(item, field, value)
-                else:
-                    # For other fields (colors, pattern, material, style, etc.), only set if not already set
-                    current_value = getattr(item, field, None)
-                    if (
-                        current_value is None
-                        or current_value == []
-                        or current_value == ""
-                        or current_value == {}
-                    ):
-                        setattr(item, field, value)
 
             await db.commit()
             logger.info(f"Updated item {item_id} with AI tags (status=ready)")

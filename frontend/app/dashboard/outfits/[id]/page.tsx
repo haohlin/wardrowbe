@@ -11,6 +11,7 @@ import {
   ChevronLeft,
   Loader2,
   Pencil,
+  Sparkles,
   Star,
   Trash2,
 } from 'lucide-react';
@@ -26,6 +27,7 @@ import { CloneToLookbookDialog } from '@/components/shared/clone-to-lookbook-dia
 import { useDeleteOutfit, useOutfit, useOutfits } from '@/lib/hooks/use-outfits';
 import { useWearToday } from '@/lib/hooks/use-studio';
 import { getErrorMessage } from '@/lib/api';
+import { useI18n } from '@/lib/i18n';
 
 export default function OutfitDetailPage() {
   const router = useRouter();
@@ -33,6 +35,7 @@ export default function OutfitDetailPage() {
   const outfitId = params?.id;
 
   const { data: outfit, isLoading } = useOutfit(outfitId);
+  const { language } = useI18n();
   const deleteMutation = useDeleteOutfit();
   const wearTodayMutation = useWearToday(outfitId ?? '');
 
@@ -78,7 +81,11 @@ export default function OutfitDetailPage() {
     }
   };
 
-  const title = outfit.name || outfit.reasoning || `${outfit.occasion} outfit`;
+  const localizedText = outfit.localized_text?.[language === 'zh' ? 'zh' : 'en'] ?? null;
+  const displayReasoning = localizedText?.headline || outfit.reasoning;
+  const displayHighlights = localizedText?.highlights?.length ? localizedText.highlights : outfit.highlights;
+  const displayTip = localizedText?.styling_tip || outfit.style_notes;
+  const title = outfit.name || displayReasoning || `${outfit.occasion} outfit`;
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
@@ -141,6 +148,63 @@ export default function OutfitDetailPage() {
       </div>
 
       <LineageCard outfit={outfit} />
+
+      {(displayReasoning || displayHighlights?.length || displayTip || outfit.try_on_image_url) && (
+        <Card className="overflow-hidden">
+          <div className="bg-gradient-to-r from-primary/10 to-primary/5 p-4 border-b">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-primary" />
+              <h2 className="font-semibold">Your Outfit</h2>
+            </div>
+            {displayReasoning && (
+              <p data-i18n-skip="true" className="mt-2 text-base font-medium text-foreground">{displayReasoning}</p>
+            )}
+            {displayHighlights && displayHighlights.length > 0 && (
+              <ul className="mt-3 space-y-1.5">
+                {displayHighlights.map((highlight, index) => (
+                  <li key={index} data-i18n-skip="true" className="flex items-start gap-2 text-sm text-muted-foreground">
+                    <span className="text-primary mt-0.5">•</span>
+                    <span>{highlight}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          {outfit.try_on_image_url && (
+            <div className="border-b bg-background">
+              <div className="relative w-full aspect-[4/3] sm:aspect-[16/9]">
+                <Image
+                  src={outfit.try_on_image_url}
+                  alt={`AI try-on preview for ${title}`}
+                  fill
+                  className="object-contain bg-muted/30"
+                  sizes="(max-width: 640px) 100vw, 896px"
+                />
+              </div>
+              <p className="px-4 py-2 text-xs text-muted-foreground">
+                AI try-on preview with front and back views based on your saved body measurements.
+              </p>
+            </div>
+          )}
+          {displayTip && (
+            <CardContent className="p-4">
+              <div data-i18n-skip="true" className="p-3 bg-muted rounded-lg border text-sm text-muted-foreground">
+                <span className="font-medium text-foreground">Tip:</span> {displayTip}
+              </div>
+            </CardContent>
+          )}
+          {outfit.debug_prompt && (
+            <CardContent className="p-4 pt-0">
+              <details className="rounded-lg border bg-muted/50 p-3 text-sm">
+                <summary className="cursor-pointer font-medium text-foreground">Debug AI prompt</summary>
+                <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-words text-xs text-muted-foreground">
+                  {outfit.debug_prompt}
+                </pre>
+              </details>
+            </CardContent>
+          )}
+        </Card>
+      )}
 
       <Card>
         <CardContent className="p-4">
