@@ -42,6 +42,17 @@ export interface FeedbackSummary {
   wore_instead_items: WoreInsteadItem[] | null;
 }
 
+export interface LocalizedOutfitTextVariant {
+  headline?: string | null;
+  highlights?: string[] | null;
+  styling_tip?: string | null;
+}
+
+export interface LocalizedOutfitText {
+  en?: LocalizedOutfitTextVariant | null;
+  zh?: LocalizedOutfitTextVariant | null;
+}
+
 export type OutfitSource = 'scheduled' | 'on_demand' | 'manual' | 'pairing';
 
 export interface Outfit {
@@ -56,6 +67,7 @@ export interface Outfit {
   reasoning: string | null;
   style_notes: string | null;
   highlights: string[] | null;
+  localized_text: LocalizedOutfitText | null;
   weather: Record<string, unknown> | null;
   items: OutfitItem[];
   feedback: FeedbackSummary | null;
@@ -65,6 +77,7 @@ export interface Outfit {
   is_starter_suggestion?: boolean;
   try_on_image_path?: string | null;
   try_on_image_url?: string | null;
+  debug_prompt?: string | null;
   created_at: string;
 }
 

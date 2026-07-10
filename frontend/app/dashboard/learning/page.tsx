@@ -32,6 +32,20 @@ import {
 import Image from 'next/image';
 import Link from 'next/link';
 import { useState } from 'react';
+import { toast } from 'sonner';
+import { useI18n } from '@/lib/i18n';
+
+function toTitleCase(value: string): string {
+  return value
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function formatLearningCategoryLabel(value: string, t: (key: string) => string): string {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'date') return t('occasion.date');
+  return t(toTitleCase(value));
+}
 
 function StatCard({
   title,
@@ -319,6 +333,7 @@ function NoLearningData({ onRecompute, isRefreshing }: { onRecompute: () => void
 }
 
 export default function LearningPage() {
+  const { t } = useI18n();
   const { data, isLoading, isError } = useLearning();
   const recompute = useRecomputeLearning();
   const generateInsights = useGenerateInsights();
@@ -329,6 +344,9 @@ export default function LearningPage() {
     setIsRefreshing(true);
     try {
       await recompute.mutateAsync();
+      toast.success('Learning profile recomputed');
+    } catch {
+      toast.error('Failed to recompute learning profile');
     } finally {
       setIsRefreshing(false);
     }
@@ -502,7 +520,7 @@ export default function LearningPage() {
                       const percentage = Math.abs(styleScore.score) * 100;
                       return (
                         <div key={styleScore.style} className="flex items-center justify-between">
-                          <span className="capitalize">{styleScore.style}</span>
+                          <span>{formatLearningCategoryLabel(styleScore.style, t)}</span>
                           <div className="flex items-center gap-2">
                             <Progress
                               value={percentage}
@@ -556,7 +574,7 @@ export default function LearningPage() {
                   {profile.occasion_patterns.map((pattern) => (
                     <div key={pattern.occasion} className="p-4 rounded-lg bg-muted/50">
                       <div className="flex items-center justify-between mb-2">
-                        <h4 className="font-medium capitalize">{pattern.occasion}</h4>
+                        <h4 className="font-medium">{formatLearningCategoryLabel(pattern.occasion, t)}</h4>
                         <Badge variant="outline">
                           {Math.round(pattern.success_rate * 100)}% success
                         </Badge>

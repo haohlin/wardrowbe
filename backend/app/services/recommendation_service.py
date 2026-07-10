@@ -43,7 +43,10 @@ SINGLE_OUTFIT_FORMAT = (
     '"highlights": ["One short sentence each — vary your reasoning across color, texture, '
     'proportion, occasion, weather, or time of day"], '
     '"styling_tip": "One specific, actionable styling detail — do not suggest rolling up '
-    'sleeves every time, vary your advice"}}'
+    'sleeves every time, vary your advice", '
+    '"localized_text": {"en": {"headline": "English title", "highlights": ["English bullet"], '
+    '"styling_tip": "English tip"}, "zh": {"headline": "简体中文标题", "highlights": ["简体中文要点"], '
+    '"styling_tip": "简体中文提示"}}}}'
 )
 
 
@@ -194,34 +197,65 @@ class RecommendationService:
     async def _get_recently_worn_outfit_combinations(
         self, user: User, days: int = 7
     ) -> set[frozenset[UUID]]:
+        return await self._get_recent_outfit_combinations(
+            user=user,
+            days=days,
+            status_values=None,
+            require_worn_feedback=True,
+        )
+
+    async def _get_recent_generated_outfit_combinations(
+        self, user: User, days: int = 14, limit: int = 12
+    ) -> set[frozenset[UUID]]:
+        return await self._get_recent_outfit_combinations(
+            user=user,
+            days=days,
+            status_values={OutfitStatus.pending, OutfitStatus.accepted, OutfitStatus.viewed},
+            require_worn_feedback=False,
+            source_values={OutfitSource.on_demand, OutfitSource.scheduled},
+            limit=limit,
+        )
+
+    async def _get_recent_outfit_combinations(
+        self,
+        user: User,
+        days: int,
+        status_values: set[OutfitStatus] | None = None,
+        require_worn_feedback: bool = False,
+        source_values: set[OutfitSource] | None = None,
+        limit: int | None = None,
+    ) -> set[frozenset[UUID]]:
         if days <= 0:
             return set()
 
         user_today = get_user_today(user)
         cutoff_date = user_today - timedelta(days=days)
 
-        query = (
-            select(Outfit)
-            .join(UserFeedback, Outfit.id == UserFeedback.outfit_id)
-            .where(
-                and_(
-                    Outfit.user_id == user.id,
-                    UserFeedback.worn_at >= cutoff_date,
-                )
+        query = select(Outfit).where(Outfit.user_id == user.id).options(selectinload(Outfit.items))
+        if require_worn_feedback:
+            query = query.join(UserFeedback, Outfit.id == UserFeedback.outfit_id).where(
+                UserFeedback.worn_at >= cutoff_date
             )
-            .options(selectinload(Outfit.items))
-        )
+        else:
+            query = query.where(Outfit.scheduled_for >= cutoff_date)
+        if status_values:
+            query = query.where(Outfit.status.in_(status_values))
+        if source_values:
+            query = query.where(Outfit.source.in_(source_values))
+        query = query.order_by(Outfit.created_at.desc())
+        if limit:
+            query = query.limit(limit)
 
         result = await self.db.execute(query)
-        worn_outfits = list(result.scalars().all())
+        outfits = list(result.scalars().unique().all())
 
         combinations = set()
-        for outfit in worn_outfits:
+        for outfit in outfits:
             item_ids = frozenset(outfit_item.item_id for outfit_item in outfit.items)
             if len(item_ids) >= 2:
                 combinations.add(item_ids)
 
-        logger.info(f"Found {len(combinations)} worn outfit combinations in last {days} days")
+        logger.info(f"Found {len(combinations)} recent outfit combinations in last {days} days")
         return combinations
 
     def _format_items_for_prompt(
@@ -312,6 +346,8 @@ class RecommendationService:
         body_measurements: dict | None = None,
         gender: str | None = None,
         user_request: str | None = None,
+        recent_generated_combinations: set[frozenset[UUID]] | None = None,
+        excluded_combinations: list[list[UUID]] | None = None,
     ) -> str:
         lines = []
 
@@ -412,6 +448,32 @@ class RecommendationService:
                     f"- Recently worn outfits (prefer variety, only repeat if necessary): {', '.join(worn_sets)}"
                 )
 
+        if recent_generated_combinations and number_map:
+            uuid_to_number = {uuid: num for num, uuid in number_map.items()}
+            generated_sets = []
+            for combo in recent_generated_combinations:
+                numbers = sorted([uuid_to_number[uuid] for uuid in combo if uuid in uuid_to_number])
+                if numbers:
+                    generated_sets.append("[" + ", ".join(map(str, numbers)) + "]")
+            if generated_sets:
+                lines.append(
+                    f"- Recently suggested outfits (avoid repeating the same combo unless no viable alternative exists): {', '.join(generated_sets)}"
+                )
+
+        if excluded_combinations and number_map:
+            uuid_to_number = {uuid: num for num, uuid in number_map.items()}
+            excluded_sets = []
+            for combo in excluded_combinations:
+                numbers = sorted([uuid_to_number[uuid] for uuid in combo if uuid in uuid_to_number])
+                if numbers:
+                    excluded_sets.append("[" + ", ".join(map(str, numbers)) + "]")
+            if excluded_sets:
+                lines.append(
+                    "- Do not repeat these already shown outfit combinations in this session: "
+                    f"{', '.join(excluded_sets)}. Pick a materially different combo using different core clothing "
+                    "slots; if no reasonable alternative exists, the service will explain that to the user."
+                )
+
         if lines:
             return "\nUSER PREFERENCES:\n" + "\n".join(lines)
         return ""
@@ -487,18 +549,56 @@ class RecommendationService:
         return good_pairs
 
     def _language_instruction(self, language: str | None) -> str:
-        if language == "zh":
-            return (
-                "\nLANGUAGE REQUIREMENT:\n"
-                "- Write headline, highlights, and styling_tip in natural Simplified Chinese.\n"
-                "- Keep JSON keys exactly in English.\n"
-                "- Do not mix English into user-facing suggestion text unless it is a brand or item name.\n"
-            )
         return (
             "\nLANGUAGE REQUIREMENT:\n"
-            "- Write headline, highlights, and styling_tip in natural English.\n"
+            "- Generate suggestion copy in BOTH English and Simplified Chinese in localized_text.\n"
+            "- localized_text.en must contain natural English headline, highlights, and styling_tip.\n"
+            "- localized_text.zh must contain natural Simplified Chinese headline, highlights, and styling_tip.\n"
+            "- For backward compatibility also set top-level headline, highlights, and styling_tip to the requested current language "
+            f"({'Simplified Chinese' if language == 'zh' else 'English'}).\n"
+            "- Do not show both languages at the same time in any one text field; keep them separated under en and zh.\n"
             "- Keep JSON keys exactly in English.\n"
         )
+
+    def _normalize_localized_text(self, outfit_data: dict, language: str | None = "en") -> dict:
+        localized = outfit_data.get("localized_text")
+        if not isinstance(localized, dict):
+            localized = {}
+
+        def clean_variant(raw: object) -> dict:
+            variant = raw if isinstance(raw, dict) else {}
+            headline = variant.get("headline") if isinstance(variant.get("headline"), str) else None
+            highlights = variant.get("highlights")
+            if not isinstance(highlights, list):
+                highlights = None
+            else:
+                highlights = [str(item) for item in highlights if isinstance(item, (str, int, float))]
+            styling_tip = variant.get("styling_tip") if isinstance(variant.get("styling_tip"), str) else None
+            return {
+                "headline": headline,
+                "highlights": highlights,
+                "styling_tip": styling_tip,
+            }
+
+        en = clean_variant(localized.get("en"))
+        zh = clean_variant(localized.get("zh"))
+
+        top_headline = outfit_data.get("headline") or outfit_data.get("reasoning")
+        top_highlights = outfit_data.get("highlights")
+        top_tip = outfit_data.get("styling_tip") or outfit_data.get("style_notes")
+        current_key = "zh" if language == "zh" else "en"
+        current = zh if current_key == "zh" else en
+        fallback = en if current_key == "zh" else zh
+
+        current["headline"] = current["headline"] or top_headline
+        current["highlights"] = current["highlights"] or (top_highlights if isinstance(top_highlights, list) else [])
+        current["styling_tip"] = current["styling_tip"] or top_tip
+        fallback["headline"] = fallback["headline"] or current["headline"]
+        fallback["highlights"] = fallback["highlights"] or current["highlights"]
+        fallback["styling_tip"] = fallback["styling_tip"] or current["styling_tip"]
+
+        outfit_data["localized_text"] = {"en": en, "zh": zh}
+        return outfit_data["localized_text"]
 
     def _body_measurements_summary(self, user: User) -> str:
         measurements = getattr(user, "body_measurements", None) or {}
@@ -548,10 +648,31 @@ class RecommendationService:
             )
             item_lines.append(f"- {desc or item.type}")
         language_name = "Chinese" if language == "zh" else "English"
+        gender = (getattr(user, "gender", None) or "").replace("_", " ").lower()
+        if gender == "female":
+            model_identity = (
+                "Render a female adult model with a feminine body silhouette and proportions matching the saved measurements. "
+                "Do not render a male or masculine body. Hair should not be used to express gender because the image is cropped at the neck. "
+            )
+        elif gender == "male":
+            model_identity = (
+                "Render a male adult model with a masculine body silhouette and proportions matching the saved measurements. "
+                "Do not render a female or feminine body. Hair should not be used to express gender because the image is cropped at the neck. "
+            )
+        elif gender:
+            model_identity = (
+                f"Render an adult model whose body silhouette reflects the user's {gender} gender identity and saved measurements. "
+                "Hair should not be used to express gender because the image is cropped at the neck. "
+            )
+        else:
+            model_identity = "Render an anonymous adult model with proportions matching the saved measurements. "
         return (
             "Create one realistic fashion try-on image for this suggested outfit. "
             "Show the same anonymous adult model wearing all listed wardrobe items. "
-            "The final picture must include TWO full-body views side by side: front and back views (front view and back view). "
+            + model_identity
+            + "The final picture must include TWO body-only views side by side: front and back views (front view and back view). "
+            "Both views must be full outfit crops from neck to shoes: start at the base of the neck, continue through the torso and legs, and include the complete shoes with feet fully visible. "
+            "Do not show the model's head; crop above the neck in both views, with no face, no facial features, no portrait framing, and no visible hair. "
             "Layer garments in a physically plausible order: shells, windbreakers, outdoor jackets, parkas, and coats are outermost; "
             "never place a jacket or shell underneath a cardigan, sweater, or long rope knit. "
             "Use a neutral studio background, realistic fabric, natural proportions, and preserve the garments' "
@@ -729,6 +850,7 @@ class RecommendationService:
         number_map: dict[int, UUID],
         scheduled_date: date | None = None,
         language: str | None = "en",
+        excluded_combinations: list[list[UUID]] | None = None,
     ) -> Outfit:
         selected_numbers = outfit_data.get("items", [])
         valid_ids = []
@@ -761,6 +883,18 @@ class RecommendationService:
         item_type_map = {row.id: (row.type or "").lower() for row in items_result}
         valid_ids = deduplicate_by_body_slot(valid_ids, item_type_map)
 
+        if excluded_combinations:
+            selected_combo = frozenset(valid_ids)
+            excluded_combo_sets = {
+                frozenset(combo) for combo in excluded_combinations if len(combo) >= 2
+            }
+            if selected_combo in excluded_combo_sets:
+                raise AIRecommendationError(
+                    "I cannot make a good suggestion without repeating an outfit combo already shown for this scenario. "
+                    "Try loosening the filters, changing the occasion/weather preference, marking some items washable/ready, "
+                    "or add more ready wardrobe items such as another compatible top, bottom, or shoes."
+                )
+
         selected_items_result = await self.db.execute(
             select(ClothingItem).where(ClothingItem.id.in_(valid_ids))
         )
@@ -781,6 +915,12 @@ class RecommendationService:
                     outfit_data["_image_model"] = get_settings().bg_removal_model
             except Exception as exc:
                 logger.warning("Try-on image generation failed; continuing without image: %s", exc)
+
+        localized = self._normalize_localized_text(outfit_data, language)
+        current_text = localized["zh" if language == "zh" else "en"]
+        outfit_data["headline"] = current_text.get("headline") or outfit_data.get("headline") or outfit_data.get("reasoning")
+        outfit_data["highlights"] = current_text.get("highlights") or outfit_data.get("highlights") or []
+        outfit_data["styling_tip"] = current_text.get("styling_tip") or outfit_data.get("styling_tip") or outfit_data.get("style_notes")
 
         reasoning = outfit_data.get("headline") or outfit_data.get("reasoning")
         style_notes = outfit_data.get("styling_tip") or outfit_data.get("style_notes")
@@ -863,53 +1003,11 @@ class RecommendationService:
         if not time_of_day:
             time_of_day = get_time_of_day(user)
 
-        result = await self.db.execute(
-            select(Outfit)
-            .where(
-                and_(
-                    Outfit.user_id == user.id,
-                    Outfit.status != OutfitStatus.rejected,
-                )
-            )
-            .options(
-                selectinload(Outfit.items).selectinload(OutfitItem.item),
-                selectinload(Outfit.feedback),
-                selectinload(Outfit.family_ratings).selectinload(FamilyOutfitRating.user),
-            )
-            .order_by(Outfit.created_at.desc())
-            .limit(80)
-        )
-        outfits = list(result.scalars().unique().all())
-        if not outfits:
+        ranked = await self._rank_existing_outfits(user, occasion, weather)
+        if not ranked:
             raise ValueError("No existing outfits found. Generate an AI outfit first or save looks to your lookbook.")
 
-        def score(outfit: Outfit) -> float:
-            score_value = 0.0
-            if outfit.occasion == occasion:
-                score_value += 40
-            elif occasion in {"casual", "weekend"} and outfit.occasion in {"casual", "outdoor", "travel"}:
-                score_value += 18
-            elif occasion in {"office", "work", "business-casual"} and outfit.occasion in {"office", "work", "smart-casual", "business-casual"}:
-                score_value += 18
-            if outfit.scheduled_for is None:
-                score_value += 12
-            if outfit.feedback and outfit.feedback.rating:
-                score_value += outfit.feedback.rating * 4
-            if outfit.status == OutfitStatus.accepted:
-                score_value += 8
-            weather_data = outfit.weather_data or {}
-            old_temp = weather_data.get("temperature")
-            if isinstance(old_temp, (int, float)):
-                score_value += max(0.0, 20.0 - abs(float(old_temp) - float(weather.temperature)))
-            condition = str(weather_data.get("condition", "")).lower()
-            if condition and condition in weather.condition.lower():
-                score_value += 8
-            item_count = len(outfit.items or [])
-            if item_count >= 2:
-                score_value += min(item_count, 5)
-            return score_value
-
-        selected = max(outfits, key=score)
+        selected = ranked[0]
         selected.weather_data = weather.to_dict()
         selected.scheduled_for = get_user_today(user)
         selected.status = OutfitStatus.pending
@@ -943,6 +1041,106 @@ class RecommendationService:
         )
         return refreshed.scalar_one()
 
+    async def auto_suggest_outfits(
+        self,
+        user: User,
+        occasion: str,
+        weather_override: WeatherData | None = None,
+        time_of_day: str | None = None,
+        language: str | None = "en",
+        user_request: str | None = None,
+        excluded_combinations: list[list[UUID]] | None = None,
+        force_generate: bool = False,
+    ) -> dict:
+        weather = await self._get_weather_for_context(user, weather_override)
+        if not time_of_day:
+            time_of_day = get_time_of_day(user)
+
+        if not force_generate and not user_request:
+            excluded_combo_sets = {
+                frozenset(combo) for combo in (excluded_combinations or []) if len(combo) >= 2
+            }
+            existing = await self._rank_existing_outfits(user, occasion, weather, min_score=50.0, limit=80)
+            if excluded_combo_sets:
+                existing = [
+                    outfit
+                    for outfit in existing
+                    if frozenset(outfit_item.item_id for outfit_item in (outfit.items or [])) not in excluded_combo_sets
+                ]
+            existing = existing[:6]
+            if existing:
+                return {"mode": "existing", "outfits": existing, "generated": False}
+
+        generated = await self.generate_recommendation(
+            user=user,
+            occasion=occasion,
+            weather_override=weather,
+            time_of_day=time_of_day,
+            language=language,
+            user_request=user_request,
+            excluded_combinations=excluded_combinations,
+        )
+        return {"mode": "generated", "outfits": [generated], "generated": True}
+
+    async def _rank_existing_outfits(
+        self,
+        user: User,
+        occasion: str,
+        weather: WeatherData,
+        min_score: float | None = None,
+        limit: int = 80,
+    ) -> list[Outfit]:
+        result = await self.db.execute(
+            select(Outfit)
+            .where(
+                and_(
+                    Outfit.user_id == user.id,
+                    Outfit.status != OutfitStatus.rejected,
+                )
+            )
+            .options(
+                selectinload(Outfit.items).selectinload(OutfitItem.item),
+                selectinload(Outfit.feedback),
+                selectinload(Outfit.family_ratings).selectinload(FamilyOutfitRating.user),
+            )
+            .order_by(Outfit.created_at.desc())
+            .limit(limit)
+        )
+        outfits = list(result.scalars().unique().all())
+        if not outfits:
+            return []
+
+        def score(outfit: Outfit) -> float:
+            score_value = 0.0
+            if outfit.occasion == occasion:
+                score_value += 40
+            elif occasion in {"casual", "weekend"} and outfit.occasion in {"casual", "weekend", "outdoor", "travel"}:
+                score_value += 18
+            elif occasion in {"office", "work", "business-casual"} and outfit.occasion in {"office", "work", "smart-casual", "business-casual"}:
+                score_value += 18
+            if outfit.scheduled_for is None:
+                score_value += 12
+            if outfit.feedback and outfit.feedback.rating:
+                score_value += outfit.feedback.rating * 4
+            if outfit.status == OutfitStatus.accepted:
+                score_value += 8
+            weather_data = outfit.weather_data or {}
+            old_temp = weather_data.get("temperature")
+            if isinstance(old_temp, (int, float)):
+                score_value += max(0.0, 20.0 - abs(float(old_temp) - float(weather.temperature)))
+            condition = str(weather_data.get("condition", "")).lower()
+            if condition and condition in weather.condition.lower():
+                score_value += 8
+            item_count = len(outfit.items or [])
+            if item_count >= 2:
+                score_value += min(item_count, 5)
+            return score_value
+
+        ranked = sorted(((score(outfit), outfit) for outfit in outfits), key=lambda pair: pair[0], reverse=True)
+        if min_score is not None:
+            ranked = [pair for pair in ranked if pair[0] >= min_score]
+        return [outfit for _, outfit in ranked[:limit]]
+
     async def generate_recommendation(
         self,
         user: User,
@@ -956,6 +1154,7 @@ class RecommendationService:
         scheduled_date: date | None = None,
         language: str | None = "en",
         user_request: str | None = None,
+        excluded_combinations: list[list[UUID]] | None = None,
     ) -> Outfit:
         exclude_items = exclude_items or []
         include_items = include_items or []
@@ -966,7 +1165,7 @@ class RecommendationService:
 
         # Determine cache eligibility before auto-merge. Free-text preference/refinement
         # requests must not reuse or populate the generic suggestion cache.
-        use_cache = not exclude_items and not include_items and not single_outfit and not user_request
+        use_cache = not exclude_items and not include_items and not single_outfit and not user_request and not excluded_combinations
 
         # Auto-exclude today's rejected items for this occasion
         rejected_ids = await self._get_today_rejected_item_ids(user, occasion)
@@ -1081,6 +1280,7 @@ class RecommendationService:
         items_text, number_map = self._format_items_for_prompt(scored, good_pairs, user_today)
 
         worn_combinations = await self._get_recently_worn_outfit_combinations(user, days=7)
+        recent_generated_combinations = await self._get_recent_generated_outfit_combinations(user, days=14)
 
         preferences_text = self._format_preferences_for_prompt(
             preferences,
@@ -1091,6 +1291,8 @@ class RecommendationService:
             body_measurements=getattr(user, "body_measurements", None),
             gender=getattr(user, "gender", None),
             user_request=user_request,
+            recent_generated_combinations=recent_generated_combinations,
+            excluded_combinations=excluded_combinations,
         )
 
         prompt = RECOMMENDATION_PROMPT.format(
@@ -1133,6 +1335,7 @@ class RecommendationService:
                     raise ValueError(f"Expected dict, got {type(outfit_data)}")
                 outfit_data["_ai_model"] = result.model
                 outfit_data["_ai_endpoint"] = result.endpoint
+                outfit_data["_debug_prompt"] = prompt
                 return await self._materialize_outfit(
                     outfit_data,
                     user,
@@ -1142,6 +1345,7 @@ class RecommendationService:
                     number_map,
                     scheduled_date=scheduled_date,
                     language=language,
+                    excluded_combinations=excluded_combinations,
                 )
 
             # Multi-outfit parse
@@ -1150,6 +1354,7 @@ class RecommendationService:
             first = outfit_list[0]
             first["_ai_model"] = result.model
             first["_ai_endpoint"] = result.endpoint
+            first["_debug_prompt"] = prompt
 
             outfit = await self._materialize_outfit(
                 first,
@@ -1160,6 +1365,7 @@ class RecommendationService:
                 number_map,
                 scheduled_date=scheduled_date,
                 language=language,
+                excluded_combinations=excluded_combinations,
             )
 
             # Cache remaining outfits for "Try Another" only for generic suggestions.
@@ -1170,6 +1376,7 @@ class RecommendationService:
                     od["_number_map"] = serializable_map
                     od["_ai_model"] = result.model
                     od["_ai_endpoint"] = result.endpoint
+                    od["_debug_prompt"] = prompt
                     to_cache.append(od)
                 await push_suggestions(user.id, occasion, to_cache, language=language)
                 logger.info(f"Cached {len(to_cache)} additional suggestions for user {user.id}")

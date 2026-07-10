@@ -118,6 +118,14 @@ class SuggestRequest(BaseModel):
     weather_override: WeatherOverrideRequest | None = None
     exclude_items: list[UUID] = Field(default_factory=list, description="Items to exclude")
     include_items: list[UUID] = Field(default_factory=list, description="Items to include")
+    excluded_combinations: list[list[UUID]] = Field(
+        default_factory=list,
+        description="Full outfit item combinations already shown in this client session",
+    )
+    force_generate: bool = Field(
+        default=False,
+        description="Bypass saved outfit pool and generate a fresh outfit from the current wardrobe",
+    )
 
 
 class OutfitItemResponse(BaseModel):
@@ -196,6 +204,7 @@ class OutfitResponse(BaseModel):
     reasoning: str | None = None
     style_notes: str | None = None
     highlights: list[str] | None = None
+    localized_text: dict | None = None
     weather: dict | None = None
     items: list[OutfitItemResponse]
     feedback: FeedbackSummary | None = None
@@ -205,7 +214,14 @@ class OutfitResponse(BaseModel):
     is_starter_suggestion: bool = False
     try_on_image_path: str | None = None
     try_on_image_url: str | None = None
+    debug_prompt: str | None = None
     created_at: datetime
+
+
+class AutoSuggestResponse(BaseModel):
+    mode: Literal["existing", "generated"]
+    outfits: list[OutfitResponse]
+    generated: bool = False
 
 
 class ExistingOutfitSuggestionRequest(BaseModel):
@@ -350,16 +366,26 @@ def outfit_to_response(
         )
 
     highlights = None
+    localized_text = None
     try_on_image_path = None
     try_on_image_url = None
     if outfit.ai_raw_response and isinstance(outfit.ai_raw_response, dict):
         raw_highlights = outfit.ai_raw_response.get("highlights")
         if raw_highlights and isinstance(raw_highlights, list):
             highlights = raw_highlights
+        raw_localized = outfit.ai_raw_response.get("localized_text")
+        if raw_localized and isinstance(raw_localized, dict):
+            localized_text = raw_localized
         raw_try_on_path = outfit.ai_raw_response.get("try_on_image_path")
         if raw_try_on_path and isinstance(raw_try_on_path, str):
             try_on_image_path = raw_try_on_path
             try_on_image_url = sign_image_url(raw_try_on_path)
+
+    debug_prompt = None
+    if get_settings().debug and outfit.ai_raw_response and isinstance(outfit.ai_raw_response, dict):
+        raw_debug_prompt = outfit.ai_raw_response.get("_debug_prompt")
+        if isinstance(raw_debug_prompt, str):
+            debug_prompt = raw_debug_prompt
 
     family_ratings_list = None
     family_rating_average = None
@@ -395,6 +421,7 @@ def outfit_to_response(
         reasoning=outfit.reasoning,
         style_notes=outfit.style_notes,
         highlights=highlights,
+        localized_text=localized_text,
         weather=outfit.weather_data,
         items=items,
         feedback=feedback_summary,
@@ -404,6 +431,7 @@ def outfit_to_response(
         is_starter_suggestion=is_starter_suggestion,
         try_on_image_path=try_on_image_path,
         try_on_image_url=try_on_image_url,
+        debug_prompt=debug_prompt,
         created_at=outfit.created_at,
     )
 
@@ -475,6 +503,70 @@ async def suggest_outfit(
 
     wore_instead_map = await fetch_wore_instead_items_map(db, [outfit], user_id=current_user.id)
     return outfit_to_response(outfit, wore_instead_map, is_starter_suggestion=is_starter)
+
+
+@router.post("/suggest/auto", response_model=AutoSuggestResponse)
+async def auto_suggest_outfits(
+    request: SuggestRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> AutoSuggestResponse:
+    await rate_limit_by_user(str(current_user.id), "suggest_auto", max_requests=10, window_seconds=60)
+
+    occasion = request.occasion
+    if occasion is None:
+        if current_user.preferences and current_user.preferences.default_occasion:
+            occasion = current_user.preferences.default_occasion
+        else:
+            occasion = "casual"
+
+    weather_override = None
+    if request.weather_override:
+        w = request.weather_override
+        weather_override = WeatherData(
+            temperature=w.temperature,
+            feels_like=w.feels_like or w.temperature,
+            humidity=w.humidity,
+            precipitation_chance=w.precipitation_chance,
+            precipitation_mm=0,
+            wind_speed=0,
+            condition=w.condition,
+            condition_code=0,
+            is_day=True,
+            uv_index=0,
+            timestamp=datetime.utcnow(),
+        )
+
+    service = RecommendationService(db)
+    try:
+        result = await service.auto_suggest_outfits(
+            user=current_user,
+            occasion=occasion,
+            weather_override=weather_override,
+            time_of_day=request.time_of_day,
+            language=request.language,
+            user_request=request.preference_note,
+            excluded_combinations=request.excluded_combinations,
+            force_generate=request.force_generate,
+        )
+    except InsufficientWardrobeError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from None
+    except AIRecommendationError as e:
+        logger.error(f"AI recommendation error: {e}")
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)) from None
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from None
+
+    outfits = result["outfits"]
+    wore_instead_map = await fetch_wore_instead_items_map(db, outfits, user_id=current_user.id)
+    item_service = ItemService(db)
+    total_items = await item_service.get_ready_item_count(current_user.id)
+    is_starter = total_items <= 5 and result["mode"] == "generated"
+    return AutoSuggestResponse(
+        mode=result["mode"],
+        outfits=[outfit_to_response(outfit, wore_instead_map, is_starter_suggestion=is_starter) for outfit in outfits],
+        generated=result["generated"],
+    )
 
 
 @router.post("/suggest-existing", response_model=OutfitResponse)

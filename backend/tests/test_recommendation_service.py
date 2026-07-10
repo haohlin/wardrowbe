@@ -373,6 +373,33 @@ class TestSuggestionLanguageAndTryOn:
         assert "82cm" in prompt
         assert "Black Slim Trousers" in prompt
         assert "Chinese" in prompt
+        assert "Do not show the model's head" in prompt
+        assert "crop above the neck" in prompt
+        assert "no face" in prompt
+        assert "neck to shoes" in prompt
+        assert "complete shoes" in prompt
+        assert "feet fully visible" in prompt
+
+    def test_try_on_prompt_explicitly_renders_female_silhouette_without_hair(self):
+        service = RecommendationService.__new__(RecommendationService)
+        user = _make_user()
+        user.gender = "female"
+        user.body_measurements = {"height": 166, "weight": 47, "shirt_size": "S"}
+        item = _make_item(name="Light Green Shirt", type="shirt", primary_color="green")
+
+        prompt = service._build_try_on_prompt(
+            user=user,
+            items=[item],
+            outfit_data={"headline": "Polished Green Minimalism"},
+            occasion="casual",
+            language="en",
+        )
+
+        assert "female adult model" in prompt
+        assert "feminine body silhouette" in prompt
+        assert "Do not render a male or masculine body" in prompt
+        assert "no visible hair" in prompt
+        assert "Hair should not be used to express gender" in prompt
 
     def test_try_on_prompt_orders_shell_outside_cardigan(self):
         service = RecommendationService.__new__(RecommendationService)

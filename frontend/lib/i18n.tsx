@@ -50,6 +50,7 @@ type TranslationKey =
   | 'common.openSidebar'
   | 'common.toggleTheme'
   | 'common.signOut'
+  | 'occasion.date'
 
 const translations: Record<Language, Record<TranslationKey, string>> = {
   en: {
@@ -98,6 +99,7 @@ const translations: Record<Language, Record<TranslationKey, string>> = {
     'common.openSidebar': 'Open sidebar',
     'common.toggleTheme': 'Toggle theme',
     'common.signOut': 'Sign out',
+    'occasion.date': 'Date',
   },
   zh: {
     'language.english': 'English',
@@ -145,6 +147,7 @@ const translations: Record<Language, Record<TranslationKey, string>> = {
     'common.openSidebar': '打开侧边栏',
     'common.toggleTheme': '切换主题',
     'common.signOut': '退出登录',
+    'occasion.date': '约会',
   },
 };
 
@@ -228,8 +231,19 @@ export const visibleTextTranslations: Record<Language, VisibleTextDictionary> = 
     'Example: clean minimalist, no bulky layering, warmer for tonight': '例如：干净极简、不要臃肿叠穿、今晚更保暖',
     'Finding your best saved look...': '正在寻找最合适的已有穿搭...',
     'Creating your look...': '正在生成你的穿搭...',
-    'Find Existing Outfit': '查找已有穿搭',
-    'Generate AI Outfit': '生成 AI 穿搭',
+    'Creating your AI outfit suggestion and try-on preview...': '正在生成 AI 穿搭建议和试穿预览...',
+    'AI is working': 'AI 正在处理',
+    'AI task needs attention': 'AI 任务需要处理',
+    'AI task finished': 'AI 任务已完成',
+    'Dismiss AI task status': '关闭 AI 任务状态',
+    'Finding or creating your AI outfit suggestion...': '正在查找或生成你的 AI 穿搭建议...',
+    'Finding or creating your look...': '正在查找或生成你的穿搭...',
+    'AI Suggestion': 'AI 推荐',
+    'Choose from available outfits': '从可用穿搭中选择',
+    'I found saved outfit previews that fit this occasion and weather.': '我找到了适合当前场合和天气的已保存穿搭预览。',
+    'Available outfit': '可用穿搭',
+    'Saved outfit preview': '已保存穿搭预览',
+    'Use this outfit': '使用这套穿搭',
     'Your Outfit': '你的穿搭',
     'Start over': '重新开始',
     'Tip:': '提示：',
@@ -845,7 +859,7 @@ function applyVisibleTranslations(language: Language): void {
 interface LanguageContextValue {
   language: Language;
   setLanguage: (language: Language) => void;
-  t: (key: TranslationKey) => string;
+  t: (key: string) => string;
 }
 
 const LanguageContext = createContext<LanguageContextValue | null>(null);
@@ -854,7 +868,10 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const [language, setLanguageState] = useState<Language>('en');
 
   useEffect(() => {
-    const saved = window.localStorage.getItem('wardrowbe_language');
+    const storage = typeof window !== 'undefined' ? window.localStorage : null;
+    const saved = storage && typeof storage.getItem === 'function'
+      ? storage.getItem('wardrowbe_language')
+      : null;
     if (saved === 'en' || saved === 'zh') {
       setLanguageState(saved);
       document.documentElement.lang = saved === 'zh' ? 'zh-CN' : 'en';
@@ -868,7 +885,10 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
 
   const setLanguage = (nextLanguage: Language) => {
     setLanguageState(nextLanguage);
-    window.localStorage.setItem('wardrowbe_language', nextLanguage);
+    const storage = typeof window !== 'undefined' ? window.localStorage : null;
+    if (storage && typeof storage.setItem === 'function') {
+      storage.setItem('wardrowbe_language', nextLanguage);
+    }
     document.documentElement.lang = nextLanguage === 'zh' ? 'zh-CN' : 'en';
   };
 
@@ -876,7 +896,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     () => ({
       language,
       setLanguage,
-      t: (key: TranslationKey) => translations[language][key] || translations.en[key],
+      t: (key: string) => translations[language][key as TranslationKey] || translations.en[key as TranslationKey] || translateVisibleText(key, language),
     }),
     [language]
   );

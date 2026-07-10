@@ -129,8 +129,9 @@ export function useRecomputeLearning() {
       }
       return api.post<LearningProfile>('/learning/recompute');
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['learning'] });
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['learning'] });
+      await queryClient.refetchQueries({ queryKey: ['learning'], type: 'active' });
     },
   });
 }

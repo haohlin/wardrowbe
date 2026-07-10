@@ -27,6 +27,7 @@ vi.mock('@/lib/hooks/use-items', () => ({
 }))
 
 import { ItemDetailDialog } from '@/components/item-detail-dialog'
+import { AiTaskProvider } from '@/lib/ai-task-context'
 import { Item } from '@/lib/types'
 
 function makeItem(overrides: Partial<Item> = {}): Item {
@@ -65,7 +66,9 @@ function renderDialog(item: Item) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     React.createElement(QueryClientProvider, { client: queryClient },
-      React.createElement(ItemDetailDialog, { item, open: true, onOpenChange: vi.fn() })
+      React.createElement(AiTaskProvider, null,
+        React.createElement(ItemDetailDialog, { item, open: true, onOpenChange: vi.fn() })
+      )
     )
   )
 }
@@ -98,7 +101,9 @@ describe('ItemDetailDialog AI analysis form sync', () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     rerender(
       React.createElement(QueryClientProvider, { client: queryClient },
-        React.createElement(ItemDetailDialog, { item: analyzed, open: true, onOpenChange: vi.fn() })
+        React.createElement(AiTaskProvider, null,
+          React.createElement(ItemDetailDialog, { item: analyzed, open: true, onOpenChange: vi.fn() })
+        )
       )
     )
 

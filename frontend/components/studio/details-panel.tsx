@@ -1,6 +1,5 @@
 'use client';
 
-import { useState } from 'react';
 import { AlertTriangle, Loader2, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -14,6 +13,7 @@ import { ITEM_ROLE } from '@/lib/studio/canonical-order';
 import { mergeAiAssist } from '@/lib/studio/ai-assist-merge';
 import type { StudioItem } from '@/lib/studio/editor-state';
 import type { Outfit, OutfitItem } from '@/lib/hooks/use-outfits';
+import { useAiTasks } from '@/lib/ai-task-context';
 
 interface DetailsPanelProps {
   items: StudioItem[];
@@ -73,7 +73,8 @@ export function DetailsPanel({
   onOccasionChange,
   onAiMerge,
 }: DetailsPanelProps) {
-  const [aiLoading, setAiLoading] = useState(false);
+  const { activeTask, startTask } = useAiTasks();
+  const aiLoading = activeTask?.type === 'studio-ai-assist';
   const warnings = computeWarnings(items);
 
   const handleAiAssist = async () => {
@@ -81,12 +82,17 @@ export function DetailsPanel({
       toast.error('Pick at least one item and an occasion first');
       return;
     }
-    setAiLoading(true);
     try {
-      const result = await api.post<Outfit>('/outfits/suggest', {
-        occasion,
-        include_items: items.map((i) => i.id),
-      });
+      const result = await startTask<Outfit>(
+        {
+          type: 'studio-ai-assist',
+          label: 'AI is finishing your studio outfit...',
+        },
+        () => api.post<Outfit>('/outfits/suggest', {
+          occasion,
+          include_items: items.map((i) => i.id),
+        })
+      );
 
       const aiStudioItems = result.items.map(toStudioItem);
       const { merged, skipped } = mergeAiAssist(items, aiStudioItems);
@@ -110,8 +116,6 @@ export function DetailsPanel({
       }
     } catch (error) {
       toast.error(getErrorMessage(error, 'AI assist failed'));
-    } finally {
-      setAiLoading(false);
     }
   };
 

@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import type { Outfit } from '@/lib/hooks/use-outfits';
+import { useI18n } from '@/lib/i18n';
 
 interface OutfitCardProps {
   outfit: Outfit;
@@ -66,8 +67,9 @@ function getSourceBadge(outfit: Outfit): {
   };
 }
 
-function getCardTitle(outfit: Outfit): string {
+function getCardTitle(outfit: Outfit, localizedHeadline?: string | null): string {
   if (outfit.name) return outfit.name;
+  if (localizedHeadline) return localizedHeadline;
   if (outfit.highlights && outfit.highlights.length > 0) {
     return outfit.highlights[0];
   }
@@ -88,11 +90,15 @@ function getMetaLabel(outfit: Outfit): string {
 }
 
 export function OutfitCard({ outfit, onClick }: OutfitCardProps) {
+  const { language } = useI18n();
+  const localizedText = outfit.localized_text?.[language === 'zh' ? 'zh' : 'en'] ?? null;
+  const localizedHighlights = localizedText?.highlights?.length ? localizedText.highlights : outfit.highlights;
+  const localizedHeadline = localizedText?.headline ?? null;
   const badge = getSourceBadge(outfit);
   const visibleItems = outfit.items.slice(0, 4);
   const overflow = outfit.items.length - visibleItems.length;
-  const title = getCardTitle(outfit);
-  const description = outfit.reasoning || (outfit.highlights && outfit.highlights.length > 0 ? outfit.highlights[0] : null);
+  const title = getCardTitle(outfit, localizedHeadline);
+  const description = localizedHeadline || outfit.reasoning || (localizedHighlights && localizedHighlights.length > 0 ? localizedHighlights[0] : null);
 
   const content = (
     <Card
@@ -171,14 +177,14 @@ export function OutfitCard({ outfit, onClick }: OutfitCardProps) {
             )}
           </div>
           {description && (
-            <p className="text-xs text-muted-foreground line-clamp-2">
+            <p data-i18n-skip="true" className="text-xs text-muted-foreground line-clamp-2">
               {description}
             </p>
           )}
-          {outfit.highlights && outfit.highlights.length > 0 && (
+          {localizedHighlights && localizedHighlights.length > 0 && (
             <ul className="space-y-0.5 text-xs text-muted-foreground">
-              {outfit.highlights.slice(0, 2).map((highlight, index) => (
-                <li key={index} className="line-clamp-1">• {highlight}</li>
+              {localizedHighlights.slice(0, 2).map((highlight, index) => (
+                <li key={index} data-i18n-skip="true" className="line-clamp-1">• {highlight}</li>
               ))}
             </ul>
           )}

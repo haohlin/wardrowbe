@@ -299,8 +299,13 @@ export interface Outfit {
   reasoning?: string;
   style_notes?: string;
   highlights?: string[];
+  localized_text?: {
+    en?: { headline?: string | null; highlights?: string[] | null; styling_tip?: string | null } | null;
+    zh?: { headline?: string | null; highlights?: string[] | null; styling_tip?: string | null } | null;
+  } | null;
   try_on_image_path?: string | null;
   try_on_image_url?: string | null;
+  debug_prompt?: string | null;
   weather?: WeatherData;
   items: OutfitItem[];
   feedback?: FeedbackSummary;
@@ -312,9 +317,9 @@ export interface Outfit {
 
 export interface SuggestRequest {
   occasion: string;
-  mode?: 'existing' | 'generate';
   language?: 'en' | 'zh';
   preference_note?: string;
+  force_generate?: boolean;
   weather_override?: {
     temperature: number;
     feels_like?: number;
@@ -324,6 +329,13 @@ export interface SuggestRequest {
   };
   exclude_items?: string[];
   include_items?: string[];
+  excluded_combinations?: string[][];
+}
+
+export interface AutoSuggestResponse {
+  mode: 'existing' | 'generated';
+  outfits: Outfit[];
+  generated: boolean;
 }
 
 // Pairing types
