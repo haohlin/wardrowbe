@@ -24,9 +24,11 @@
   "firstItem": {
     "addToWardrobe": "Aggiungi al guardaroba",
     "chooseDifferentPhoto": "Scegli un'altra foto",
+    "chooseFromLibrary": "Scegli dalla libreria",
     "description": "Scatta una foto o carica un'immagine di un capo di abbigliamento",
     "formatHint": "PNG, JPG o HEIC",
     "previewAlt": "Anteprima",
+    "takePhoto": "Scatta una foto",
     "title": "Aggiungi il tuo primo capo",
     "typeLabel": "Che tipo di capo è?",
     "typePlaceholder": "Seleziona tipo...",

@@ -24,9 +24,11 @@
   "firstItem": {
     "addToWardrobe": "添加到衣橱",
     "chooseDifferentPhoto": "选择其他照片",
+    "chooseFromLibrary": "从照片库选择",
     "description": "拍照或上传一张衣物图片",
     "formatHint": "PNG、JPG 或 HEIC",
     "previewAlt": "预览",
+    "takePhoto": "拍照",
     "title": "添加您的第一件单品",
     "typeLabel": "这是什么类型的衣物？",
     "typePlaceholder": "选择类型...",

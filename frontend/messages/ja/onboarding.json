@@ -24,9 +24,11 @@
   "firstItem": {
     "addToWardrobe": "ワードローブに追加",
     "chooseDifferentPhoto": "別の写真を選ぶ",
+    "chooseFromLibrary": "ライブラリから選択",
     "description": "衣類の写真を撮るか、画像をアップロードしてください",
     "formatHint": "PNG、JPG、HEIC",
     "previewAlt": "プレビュー",
+    "takePhoto": "写真を撮る",
     "title": "最初のアイテムを追加",
     "typeLabel": "これはどんなタイプの服ですか？",
     "typePlaceholder": "タイプを選択...",
