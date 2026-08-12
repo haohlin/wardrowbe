@@ -145,6 +145,32 @@ class TestTagParsing:
         tags = service._parse_tags_from_response(response)
         assert tags.formality is None
 
+    def test_parse_provider_aliases_and_scalar_lists(self):
+        service = AIService()
+        tags = service._parse_tags_from_response(
+            """{
+                "category": "shirt",
+                "item_name": "Oxford shirt",
+                "sub_type": "button-down",
+                "dominant_color": "navy",
+                "colors": "navy",
+                "style": "classic",
+                "season": "fall",
+                "label": "Acme",
+                "notes": "Crisp cotton shirt"
+            }"""
+        )
+
+        assert tags.type == "shirt"
+        assert tags.ai_name == "Oxford shirt"
+        assert tags.subtype == "button-down"
+        assert tags.primary_color == "navy"
+        assert tags.colors == ["navy"]
+        assert tags.style == ["classic"]
+        assert tags.season == ["fall"]
+        assert tags.brand == "Acme"
+        assert tags.description == "Crisp cotton shirt"
+
 
 class TestClothingTags:
     """Tests for ClothingTags model."""
@@ -177,6 +203,39 @@ class TestClothingTags:
         assert tags.primary_color == "navy"
         assert len(tags.colors) == 2
         assert tags.confidence == 0.92
+
+
+class TestChatRequestCompatibility:
+    def test_gpt5_uses_completion_tokens_and_omits_unsupported_fields(self):
+        service = AIService()
+
+        body = service._build_chat_request(
+            model="openai/gpt-5.5",
+            messages=[{"role": "user", "content": "hello"}],
+            temperature=0.4,
+            logprobs=True,
+        )
+
+        assert body["max_completion_tokens"] == service.settings.ai_max_tokens
+        assert "max_tokens" not in body
+        assert "temperature" not in body
+        assert "logprobs" not in body
+        assert "top_logprobs" not in body
+
+    def test_compatible_models_keep_standard_fields(self):
+        service = AIService()
+
+        body = service._build_chat_request(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": "hello"}],
+            temperature=0.4,
+            logprobs=True,
+        )
+
+        assert body["max_tokens"] == service.settings.ai_max_tokens
+        assert body["temperature"] == 0.4
+        assert body["logprobs"] is True
+        assert body["top_logprobs"] == 3
 
 
 class TestGenerateTextTruncatedResponse:
@@ -297,6 +356,7 @@ class TestLogprobsRejection:
     @pytest.mark.asyncio
     async def test_retries_without_logprobs_after_rejection(self):
         service = AIService()
+        service._endpoints[0].vision_model = "gpt-4o"
         responses = [self._logprobs_rejected_response(), self._success_response(self._TAGS_CONTENT)]
 
         with patch("httpx.AsyncClient.post", side_effect=responses) as mock_post:
@@ -317,6 +377,7 @@ class TestLogprobsRejection:
     @pytest.mark.asyncio
     async def test_logprobs_rejection_does_not_consume_retry_budget(self):
         service = AIService()
+        service._endpoints[0].vision_model = "gpt-4o"
         service.settings = service.settings.model_copy(update={"ai_max_retries": 1})
         responses = [self._logprobs_rejected_response(), self._success_response(self._TAGS_CONTENT)]
 
@@ -332,6 +393,7 @@ class TestLogprobsRejection:
     @pytest.mark.asyncio
     async def test_unrelated_400_is_not_treated_as_logprobs_rejection(self):
         service = AIService()
+        service._endpoints[0].vision_model = "gpt-4o"
         service.settings = service.settings.model_copy(update={"ai_max_retries": 1})
         unrelated_400 = _mock_response({"error": {"message": "invalid model"}}, status_code=400)
 

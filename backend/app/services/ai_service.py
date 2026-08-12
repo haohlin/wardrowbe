@@ -27,6 +27,7 @@ class TextGenerationResult(BaseModel):
 
 
 class ClothingTags(BaseModel):
+    ai_name: str | None = None
     type: str = "unknown"
     subtype: str | None = None
     primary_color: str | None = None
@@ -315,6 +316,30 @@ class AIService:
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
 
+    def _build_chat_request(
+        self,
+        model: str,
+        messages: list,
+        temperature: float | None = None,
+        logprobs: bool = False,
+    ) -> dict:
+        model_lower = model.lower()
+        uses_completion_tokens = "gpt-5" in model_lower
+        body = {
+            "model": model,
+            "messages": messages,
+            "stream": False,
+            (
+                "max_completion_tokens" if uses_completion_tokens else "max_tokens"
+            ): self.settings.ai_max_tokens,
+        }
+        if temperature is not None and not uses_completion_tokens:
+            body["temperature"] = temperature
+        if logprobs and not uses_completion_tokens:
+            body["logprobs"] = True
+            body["top_logprobs"] = 3
+        return body
+
     def _preprocess_image(self, image_path: str | Path) -> str:
         """
         Preprocess image for AI analysis.
@@ -424,21 +449,46 @@ class AIService:
         tags = ClothingTags()
         tags.raw_response = response_text
 
-        item_type = validate_value(data.get("type"), VALID_TYPES)
+        def first_text(*keys: str) -> str | None:
+            for key in keys:
+                value = data.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+            return None
+
+        def normalize_list(value) -> list:
+            if isinstance(value, list):
+                return value
+            if isinstance(value, str) and value.strip():
+                return [value]
+            return []
+
+        item_type = validate_value(first_text("type", "item_type", "category"), VALID_TYPES)
         if item_type:
             tags.type = item_type
         else:
             tags.type = "unknown"
 
-        tags.subtype = data.get("subtype") if data.get("subtype") else None
-        tags.primary_color = validate_value(data.get("primary_color"), VALID_COLORS)
-        tags.colors = validate_list(data.get("colors", []), VALID_COLORS)
+        tags.ai_name = first_text("name", "item_name", "title")
+        tags.subtype = first_text("subtype", "sub_type")
+        tags.primary_color = validate_value(
+            first_text("primary_color", "color", "main_color", "dominant_color"), VALID_COLORS
+        )
+        tags.colors = validate_list(normalize_list(data.get("colors", [])), VALID_COLORS)
+        if tags.primary_color and tags.primary_color not in tags.colors:
+            tags.colors.insert(0, tags.primary_color)
         tags.pattern = validate_value(data.get("pattern"), VALID_PATTERNS)
         tags.material = validate_value(data.get("material"), VALID_MATERIALS)
         tags.formality = validate_value(data.get("formality"), VALID_FORMALITY)
-        tags.style = validate_list(data.get("style", []), VALID_STYLES)
-        tags.season = validate_list(data.get("season", []), VALID_SEASONS)
+        tags.style = validate_list(normalize_list(data.get("style", [])), VALID_STYLES)
+        tags.season = validate_list(normalize_list(data.get("season", [])), VALID_SEASONS)
         tags.fit = validate_value(data.get("fit"), VALID_FIT)
+        tags.brand = first_text("brand", "label", "designer", "manufacturer")
+        tags.condition = first_text("condition")
+        features = data.get("features", [])
+        if isinstance(features, list):
+            tags.features = [str(value).strip() for value in features if str(value).strip()]
+        tags.description = first_text("description", "notes", "caption")
         tags.confidence = compute_tag_completeness(tags)
 
         logger.info(
@@ -464,15 +514,11 @@ class AIService:
                 attempt = 0
                 while attempt < self.settings.ai_max_retries:
                     try:
-                        request_body = {
-                            "model": model,
-                            "messages": messages,
-                            "stream": False,
-                            "max_tokens": self.settings.ai_max_tokens,
-                        }
-                        if use_logprobs:
-                            request_body["logprobs"] = True
-                            request_body["top_logprobs"] = 3
+                        request_body = self._build_chat_request(
+                            model=model,
+                            messages=messages,
+                            logprobs=use_logprobs,
+                        )
 
                         response = await client.post(
                             f"{endpoint.url}/chat/completions",
@@ -677,13 +723,11 @@ class AIService:
                         response = await client.post(
                             f"{endpoint.url}/chat/completions",
                             headers=self._get_headers(),
-                            json={
-                                "model": endpoint.text_model,
-                                "messages": messages,
-                                "stream": False,
-                                "temperature": 0.4,
-                                "max_tokens": self.settings.ai_max_tokens,
-                            },
+                            json=self._build_chat_request(
+                                model=endpoint.text_model,
+                                messages=messages,
+                                temperature=0.4,
+                            ),
                         )
                         response.raise_for_status()
 

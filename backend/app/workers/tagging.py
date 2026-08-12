@@ -114,6 +114,9 @@ def tags_to_item_fields(tags: ClothingTags, raw_response: str | None = None) -> 
     fields = {
         "type": tags.type,
         "subtype": tags.subtype,
+        "name": tags.ai_name,
+        "brand": tags.brand,
+        "notes": tags.description,
         "primary_color": tags.primary_color,
         "colors": tags.colors,
         "pattern": tags.pattern,

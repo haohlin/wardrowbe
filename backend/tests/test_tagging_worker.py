@@ -5,7 +5,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.item import ClothingItem, ItemStatus
-from app.workers.tagging import update_item_status_to_error
+from app.services.ai_service import ClothingTags
+from app.workers.tagging import tags_to_item_fields, update_item_status_to_error
 
 
 async def _get_item(db_session: AsyncSession, item_id) -> ClothingItem:
@@ -59,3 +60,18 @@ class TestUpdateItemStatusToError:
         refreshed = await _get_item(db_session, item.id)
         assert refreshed.status == ItemStatus.ready
         assert refreshed.ai_raw_response is None
+
+
+def test_tag_fields_include_editable_ai_identity_fields():
+    fields = tags_to_item_fields(
+        ClothingTags(
+            type="shirt",
+            ai_name="Oxford shirt",
+            brand="Acme",
+            description="Crisp cotton shirt",
+        )
+    )
+
+    assert fields["name"] == "Oxford shirt"
+    assert fields["brand"] == "Acme"
+    assert fields["notes"] == "Crisp cotton shirt"
