@@ -1,0 +1,21 @@
+name: wardrowbe-tailscale-oidc
+
+services:
+  dex:
+    image: ghcr.io/dexidp/dex:v2.45.1
+    container_name: wardrowbe-dex
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    ports:
+      - "127.0.0.1:5556:5556"
+    volumes:
+      - ./runtime/dex.yaml:/etc/dex/config.yaml:ro
+      - dex-data:/var/dex
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/dex", "version"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  dex-data:
