@@ -27,18 +27,23 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 settings = get_settings()
 
 
-def create_access_token(external_id: str, expires_delta: timedelta | None = None) -> str:
+def create_access_token(subject: str, expires_delta: timedelta | None = None) -> str:
     now = datetime.utcnow()
     if expires_delta:
         expire = now + expires_delta
     else:
         expire = now + timedelta(days=7)
     to_encode = {
-        "sub": external_id,
+        "sub": subject,
         "exp": expire,
         "iat": now,
     }
     return jwt.encode(to_encode, settings.secret_key, algorithm="HS256")
+
+
+def create_user_access_token(user: User, expires_delta: timedelta | None = None) -> str:
+    """Create an API token tied to immutable Wardrowbe user identity."""
+    return create_access_token(str(user.id), expires_delta)
 
 
 def _is_dev_mode() -> bool:
@@ -180,7 +185,7 @@ async def sync_user(
             detail=str(e),
         ) from None
 
-    access_token = create_access_token(user.external_id)
+    access_token = create_user_access_token(user)
 
     return UserSyncResponse(
         id=user.id,

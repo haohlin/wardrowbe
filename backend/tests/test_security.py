@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from app.api.auth import _is_dev_mode
 from app.config import Settings
 from app.schemas.notification import NtfyConfig, ScheduleBase, ScheduleUpdate
+from app.utils.auth import decode_token
 
 
 class TestAIEndpointSchemeValidation:
@@ -325,6 +326,64 @@ class TestProviderMigrationRequiresVerifiedEmail:
                 },
             )
             assert response.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_verified_connectors_keep_both_api_sessions_valid(
+        self, client, db_session, test_user
+    ):
+        claims = [
+            {
+                "sub": "dex|tailscale|owner",
+                "email": test_user.email,
+                "email_verified": True,
+            },
+            {
+                "sub": "dex|local|owner",
+                "email": test_user.email,
+                "email_verified": True,
+            },
+        ]
+        with (
+            patch("app.api.auth._is_dev_mode", return_value=False),
+            patch("app.api.auth._oidc_configured", return_value=True),
+            patch("app.api.auth.validate_oidc_id_token", new_callable=AsyncMock) as validate,
+            patch("app.api.auth.rate_limit_by_ip", new_callable=AsyncMock),
+            patch("app.api.auth.settings") as mock_settings,
+        ):
+            validate.side_effect = claims
+            mock_settings.oidc_issuer_url = "https://auth.example.com"
+            mock_settings.oidc_client_id = "wardrowbe-web"
+            mock_settings.oidc_mobile_client_id = "wardrowbe-mobile"
+            mock_settings.secret_key = "change-me-in-production"
+
+            responses = []
+            for claim in claims:
+                responses.append(
+                    await client.post(
+                        "/api/v1/auth/sync",
+                        json={
+                            "external_id": claim["sub"],
+                            "email": test_user.email,
+                            "display_name": "Owner",
+                            "id_token": "fake-token",
+                        },
+                    )
+                )
+
+        assert [response.status_code for response in responses] == [200, 200]
+        tokens = [response.json()["access_token"] for response in responses]
+        assert [decode_token(token).sub for token in tokens] == [
+            str(test_user.id),
+            str(test_user.id),
+        ]
+
+        for token in tokens:
+            response = await client.get(
+                "/api/v1/users/me",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert response.status_code == 200
+            assert response.json()["id"] == str(test_user.id)
 
 
 class TestDevModeAuthDecoupledFromSecretKey:

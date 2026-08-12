@@ -2,6 +2,8 @@ import { NextAuthOptions } from 'next-auth';
 import type { OAuthConfig } from 'next-auth/providers/oauth';
 import CredentialsProvider from 'next-auth/providers/credentials';
 
+import { selectAuthProviderIds } from './auth-providers';
+
 interface OIDCProfile {
   sub: string;
   name?: string;
@@ -84,16 +86,13 @@ const DevCredentialsProvider = CredentialsProvider({
 });
 // Determine which provider to use
 function getProviders() {
-  const providers = [];
-
-  if (process.env.OIDC_ISSUER_URL) {
-    providers.push(OIDCProvider);
-  }
-
-  if (process.env.DEV_MODE === 'true' || process.env.NODE_ENV === 'development') {
-    providers.push(DevCredentialsProvider);
-  }
-  return providers;
+  return selectAuthProviderIds({
+    oidcIssuerUrl: process.env.OIDC_ISSUER_URL,
+    devMode: process.env.DEV_MODE,
+    nodeEnv: process.env.NODE_ENV,
+  }).map((providerId) =>
+    providerId === 'oidc' ? OIDCProvider : DevCredentialsProvider
+  );
 }
 
 export const authOptions: NextAuthOptions = {

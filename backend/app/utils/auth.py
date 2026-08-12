@@ -1,4 +1,5 @@
 from typing import Annotated
+from uuid import UUID
 
 import jwt
 from fastapi import Depends, HTTPException, status
@@ -39,6 +40,21 @@ def decode_token(token: str) -> TokenPayload:
         ) from None
 
 
+async def _resolve_token_subject(user_service: UserService, subject: str) -> User | None:
+    """Resolve new internal-ID subjects, then legacy external-ID subjects."""
+    try:
+        internal_id = UUID(subject)
+    except ValueError:
+        internal_id = None
+
+    if internal_id is not None:
+        user = await user_service.get_by_id(internal_id)
+        if user is not None:
+            return user
+
+    return await user_service.get_by_external_id(subject)
+
+
 async def get_current_user_optional(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -49,7 +65,7 @@ async def get_current_user_optional(
     try:
         token_data = decode_token(credentials.credentials)
         user_service = UserService(db)
-        return await user_service.get_by_external_id(token_data.sub)
+        return await _resolve_token_subject(user_service, token_data.sub)
     except HTTPException:
         return None
 
@@ -63,7 +79,7 @@ async def get_current_user(
 
     if credentials:
         token_data = decode_token(credentials.credentials)
-        user = await user_service.get_by_external_id(token_data.sub)
+        user = await _resolve_token_subject(user_service, token_data.sub)
 
     if not user:
         raise HTTPException(

@@ -92,6 +92,23 @@ class TestAuthSync:
         assert data["is_new_user"] is False
 
     @pytest.mark.asyncio
+    async def test_sync_access_token_uses_stable_internal_user_id(
+        self, client: AsyncClient, test_user
+    ):
+        response = await client.post(
+            "/api/v1/auth/sync",
+            json={
+                "external_id": test_user.external_id,
+                "email": test_user.email,
+                "display_name": test_user.display_name,
+            },
+        )
+
+        assert response.status_code == 200
+        token = decode_token(response.json()["access_token"])
+        assert token.sub == str(test_user.id)
+
+    @pytest.mark.asyncio
     async def test_sync_missing_required_fields(self, client: AsyncClient):
         response = await client.post(
             "/api/v1/auth/sync",
@@ -201,3 +218,15 @@ class TestProtectedRoutes:
         assert response.status_code == 200
         data = response.json()
         assert data["email"] == test_user.email
+
+    @pytest.mark.asyncio
+    async def test_internal_user_id_token_succeeds(self, client: AsyncClient, test_user):
+        token = create_access_token(str(test_user.id))
+
+        response = await client.get(
+            "/api/v1/users/me",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["id"] == str(test_user.id)
