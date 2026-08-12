@@ -6,6 +6,26 @@ Wardrowbe uses NextAuth as its browser session layer and an OIDC provider as acc
 
 Development credentials accept arbitrary email/name values. They are suitable only while frontend and backend listen on loopback. They are not family authentication and must never be used on a LAN, Tailscale, or public listener.
 
+When OIDC is configured, it is the exclusive browser provider. `DEV_MODE=true`
+is required to enable development credentials, and OIDC still takes precedence.
+
+## Native iOS private deployment
+
+The implemented private deployment uses Tailscale Serve for Wardrowbe at
+`https://g7x9r272rq.tail37713f.ts.net:8445` and Dex at
+`https://g7x9r272rq.tail37713f.ts.net:8446/dex`. Services behind both origins
+remain bound to loopback, and Tailscale Funnel remains disabled.
+
+The official iOS app must receive only the Wardrowbe origin. Do not append
+`/api/v1`; the app constructs that path. Dex provides a public PKCE mobile
+client and a confidential web client. Its Tailscale connector consumes identity
+headers added by Tailscale Serve, while its Email option uses a local bcrypt
+password. Both verified login methods must present the same email so they map to
+one internal Wardrowbe user.
+
+Setup, status, backup, rotation, and rollback commands are documented in
+`deploy/tailscale-oidc/README.md`.
+
 ## Mac test phase
 
 - Frontend: `127.0.0.1:3000` only.
