@@ -5,7 +5,7 @@ from io import BytesIO
 from pathlib import Path
 
 import imagehash
-from PIL import Image
+from PIL import Image, ImageOps
 
 from app.config import get_settings
 from app.services import background_removal
@@ -29,6 +29,9 @@ ALLOWED_MIME_TYPES = {
     "image/webp",
     "image/heic",
     "image/heif",
+    "image/heic-sequence",
+    "image/heif-sequence",
+    "application/octet-stream",
 }
 
 
@@ -84,6 +87,10 @@ class ImageService:
         image.save(output, format="JPEG", quality=quality, optimize=True)
         return output.getvalue()
 
+    @staticmethod
+    def _normalize_orientation(image: Image.Image) -> Image.Image:
+        return ImageOps.exif_transpose(image)
+
     async def process_and_store(
         self,
         user_id: uuid.UUID,
@@ -110,6 +117,7 @@ class ImageService:
             image = self._convert_heic(image_data)
         else:
             image = Image.open(BytesIO(image_data))
+        image = self._normalize_orientation(image)
 
         # Generate base filename
         base_filename = self._generate_filename(".jpg")
@@ -163,10 +171,21 @@ class ImageService:
                 if full_path.exists():
                     full_path.unlink()
 
-    def validate_image(self, image_data: bytes, content_type: str) -> bool:
+    def validate_image(
+        self,
+        image_data: bytes,
+        content_type: str,
+        filename: str | None = None,
+    ) -> bool:
         """Validate image data and content type."""
-        # Check content type
-        if content_type not in ALLOWED_MIME_TYPES:
+        normalized_content_type = content_type.split(";", 1)[0].strip().lower()
+        extension = Path(filename or "").suffix.lower()
+        if normalized_content_type not in ALLOWED_MIME_TYPES:
+            return False
+        if (
+            normalized_content_type == "application/octet-stream"
+            and extension not in ALLOWED_EXTENSIONS
+        ):
             return False
 
         # Check file size (max 20MB)
@@ -175,7 +194,12 @@ class ImageService:
 
         # Try to open as image
         try:
-            if content_type in ("image/heic", "image/heif"):
+            if normalized_content_type in {
+                "image/heic",
+                "image/heif",
+                "image/heic-sequence",
+                "image/heif-sequence",
+            } or extension in {".heic", ".heif"}:
                 self._convert_heic(image_data)
             else:
                 Image.open(BytesIO(image_data))
@@ -195,6 +219,7 @@ class ImageService:
             image = self._convert_heic(image_data)
         else:
             image = Image.open(BytesIO(image_data))
+        image = self._normalize_orientation(image)
 
         # Convert to RGB if needed for consistent hashing
         if image.mode != "RGB":

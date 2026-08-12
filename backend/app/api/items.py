@@ -129,7 +129,7 @@ async def create_item(
     content = await image.read()
     content_type = image.content_type or "application/octet-stream"
 
-    if not image_service.validate_image(content, content_type):
+    if not image_service.validate_image(content, content_type, image.filename):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid image file. Supported formats: JPEG, PNG, WebP, HEIC",
@@ -258,7 +258,7 @@ async def bulk_create_items(
                 content = await upload_file.read()
                 content_type = upload_file.content_type or "application/octet-stream"
 
-                if not image_service.validate_image(content, content_type):
+                if not image_service.validate_image(content, content_type, upload_file.filename):
                     results.append(
                         BulkUploadResult(
                             filename=filename,
@@ -1271,7 +1271,7 @@ async def replace_item_image(
     content = await image.read()
     content_type = image.content_type or "application/octet-stream"
 
-    if not image_service.validate_image(content, content_type):
+    if not image_service.validate_image(content, content_type, image.filename):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid image file. Supported formats: JPEG, PNG, WebP, HEIC",
@@ -1357,7 +1357,7 @@ async def add_item_image(
     content = await image.read()
     content_type = image.content_type or "application/octet-stream"
 
-    if not image_service_inst.validate_image(content, content_type):
+    if not image_service_inst.validate_image(content, content_type, image.filename):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid image file. Supported formats: JPEG, PNG, WebP, HEIC",
