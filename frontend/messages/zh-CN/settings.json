@@ -5,6 +5,17 @@
     "name": "名称",
     "title": "账号"
   },
+  "gender": {
+    "description": "用于更贴合身形的穿搭建议，可选填",
+    "help": "如果不希望推荐使用此信息，请保持未指定。",
+    "label": "性别认同",
+    "options": { "female": "女性", "male": "男性", "nonBinary": "非二元性别", "preferNotToSay": "不愿透露", "unspecified": "未指定" },
+    "placeholder": "选择性别",
+    "save": "保存性别",
+    "saveError": "保存性别失败",
+    "saved": "性别已保存",
+    "title": "性别认同"
+  },
   "aiEndpoints": {
     "active": "活跃",
     "addEndpoint": "添加端点",

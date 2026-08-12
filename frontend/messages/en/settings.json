@@ -5,6 +5,17 @@
     "name": "Name",
     "title": "Account"
   },
+  "gender": {
+    "description": "Optional context for fit-aware outfit suggestions",
+    "help": "Leave this unspecified if you do not want it used in recommendations.",
+    "label": "Gender identity",
+    "options": { "female": "Female", "male": "Male", "nonBinary": "Non-binary", "preferNotToSay": "Prefer not to say", "unspecified": "Not specified" },
+    "placeholder": "Select gender",
+    "save": "Save gender",
+    "saveError": "Failed to save gender",
+    "saved": "Gender saved",
+    "title": "Gender identity"
+  },
   "aiEndpoints": {
     "active": "Active",
     "addEndpoint": "Add Endpoint",
