@@ -19,6 +19,7 @@ from app.workers.notifications import (
 )
 from app.workers.settings import get_redis_settings
 from app.workers.tagging import TAGGING_MAX_TRIES, tag_item_image, worker_job_timeout_seconds
+from app.workers.tryon import generate_tryon
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,7 @@ class WorkerSettings:
         process_scheduled_notification,
         check_wash_reminders,
         update_learning_profiles,
+        generate_tryon,
     ]
 
     cron_jobs = [

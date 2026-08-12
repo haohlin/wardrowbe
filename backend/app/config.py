@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     # retry is never permitted inside a spacing window arq already exhausted.
     ai_retry_cooldown_seconds: int = Field(default=120, ge=0)
 
+    # Virtual try-on image editing. Uses the same OpenAI-compatible endpoint/key.
+    tryon_model: str = Field(default="gcp/google/gemini-3-pro-image")
+    tryon_fallback_model: str = Field(default="gcp/google/gemini-3.1-flash-image")
+
     # Weather
     openmeteo_url: str = Field(default="https://api.open-meteo.com/v1")
     geocoding_user_agent: str | None = Field(default=None)
