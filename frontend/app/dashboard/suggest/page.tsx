@@ -37,6 +37,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Collapsible,
   CollapsibleContent,
@@ -312,6 +313,10 @@ function OutfitResult({
   onReject,
   onTryAnother,
   onNewRequest,
+  onRefine,
+  refinementNote,
+  onRefinementNoteChange,
+  isGenerating,
   t,
 }: {
   outfit: Outfit;
@@ -321,6 +326,10 @@ function OutfitResult({
   onReject: () => void;
   onTryAnother: () => void;
   onNewRequest: () => void;
+  onRefine: () => void;
+  refinementNote: string;
+  onRefinementNoteChange: (value: string) => void;
+  isGenerating: boolean;
   t: Translator;
 }) {
   return (
@@ -429,6 +438,26 @@ function OutfitResult({
         </CardContent>
       </Card>
 
+      <Card>
+        <CardContent className="p-4 space-y-3">
+          <div>
+            <h3 className="font-semibold">{t('refine.title')}</h3>
+            <p className="text-sm text-muted-foreground">{t('refine.description')}</p>
+          </div>
+          <Textarea
+            value={refinementNote}
+            onChange={(event) => onRefinementNoteChange(event.target.value)}
+            placeholder={t('refine.placeholder')}
+            maxLength={500}
+            className="min-h-[96px]"
+          />
+          <Button variant="outline" onClick={onRefine} disabled={isGenerating || !refinementNote.trim()} className="w-full gap-2">
+            {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            {t('refine.action')}
+          </Button>
+        </CardContent>
+      </Card>
+
       {/* Action buttons */}
       <div className="flex gap-3 justify-center">
         <Button variant="outline" size="lg" onClick={onTryAnother} className="gap-2">
@@ -457,6 +486,8 @@ export default function SuggestPage() {
   const [selectedOccasion, setSelectedOccasion] = useState<string | null>(null);
   const [occasionInitialized, setOccasionInitialized] = useState(false);
   const [weatherOverride, setWeatherOverride] = useState<WeatherOverride | null>(null);
+  const [preferenceNote, setPreferenceNote] = useState('');
+  const [refinementNote, setRefinementNote] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [outfit, setOutfit] = useState<Outfit | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -468,7 +499,7 @@ export default function SuggestPage() {
     }
   }, [prefs, occasionInitialized, selectedOccasion]);
 
-  const handleGenerate = async () => {
+  const handleGenerate = async (noteOverride?: string) => {
     if (!selectedOccasion) return;
 
     if (session?.accessToken) {
@@ -482,6 +513,8 @@ export default function SuggestPage() {
       const request: SuggestRequest = {
         occasion: selectedOccasion,
       };
+      const note = (noteOverride ?? preferenceNote).trim();
+      if (note) request.preference_note = note;
 
       if (weatherOverride) {
         request.weather_override = {
@@ -498,6 +531,7 @@ export default function SuggestPage() {
         () => api.post<Outfit>('/outfits/suggest', request)
       );
       setOutfit(result);
+      setRefinementNote('');
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -528,7 +562,13 @@ export default function SuggestPage() {
 
   const handleTryAnother = () => {
     setOutfit(null);
-    handleGenerate();
+    void handleGenerate();
+  };
+
+  const handleRefine = () => {
+    if (!refinementNote.trim()) return;
+    setOutfit(null);
+    void handleGenerate(refinementNote);
   };
 
   const handleReject = async () => {
@@ -545,12 +585,14 @@ export default function SuggestPage() {
     }
 
     setOutfit(null);
-    handleGenerate();
+    void handleGenerate();
   };
 
   const handleNewRequest = () => {
     setOutfit(null);
     setSelectedOccasion(null);
+    setPreferenceNote('');
+    setRefinementNote('');
     setError(null);
   };
 
@@ -596,12 +638,24 @@ export default function SuggestPage() {
                 t={t}
               />
 
+              <div className="space-y-2">
+                <h2 className="font-semibold">{t('preference.title')}</h2>
+                <p className="text-sm text-muted-foreground">{t('preference.description')}</p>
+                <Textarea
+                  value={preferenceNote}
+                  onChange={(event) => setPreferenceNote(event.target.value)}
+                  placeholder={t('preference.placeholder')}
+                  maxLength={500}
+                  className="min-h-[96px]"
+                />
+              </div>
+
               {/* Generate button */}
               <div className="pt-2">
                 <Button
                   size="lg"
                   className="w-full gap-2"
-                  onClick={handleGenerate}
+                  onClick={() => void handleGenerate()}
                   disabled={!selectedOccasion || isGenerating}
                 >
                   {isGenerating ? (
@@ -629,6 +683,10 @@ export default function SuggestPage() {
           onReject={handleReject}
           onTryAnother={handleTryAnother}
           onNewRequest={handleNewRequest}
+          onRefine={handleRefine}
+          refinementNote={refinementNote}
+          onRefinementNoteChange={setRefinementNote}
+          isGenerating={isGenerating}
           t={t}
         />
       )}

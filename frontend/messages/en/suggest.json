@@ -27,6 +27,8 @@
     "yesWoreIt": "Yes, I wore it"
   },
   "generating": "Creating your look...",
+  "preference": { "description": "Optional: tell the stylist what you want or want to avoid today.", "placeholder": "Example: clean minimalist, no bulky layers, warmer for tonight", "title": "Preference for this suggestion" },
+  "refine": { "action": "Tweak suggestion", "description": "Tell the stylist what to change, then generate a refined version.", "placeholder": "Example: make it cleaner and less bulky", "title": "Adjust this suggestion" },
   "getSuggestion": "Get Suggestion",
   "greeting": {
     "afternoon": "Good afternoon",

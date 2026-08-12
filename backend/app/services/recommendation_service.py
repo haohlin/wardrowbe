@@ -289,8 +289,12 @@ class RecommendationService:
         occasion: str | None = None,
         body_measurements: dict | None = None,
         gender: str | None = None,
+        user_request: str | None = None,
     ) -> str:
         lines = []
+
+        if user_request and user_request.strip():
+            lines.append(f"- CURRENT USER REQUEST: {user_request.strip()}")
 
         if gender:
             lines.append(
@@ -649,18 +653,20 @@ class RecommendationService:
         time_of_day: str | None = None,
         single_outfit: bool = False,
         scheduled_date: date | None = None,
+        user_request: str | None = None,
     ) -> Outfit:
         # Guard first so deferral is unconditional, before any location/weather work.
         require_internal_ai("text")
 
         exclude_items = exclude_items or []
         include_items = include_items or []
+        user_request = user_request.strip() if user_request and user_request.strip() else None
 
         if not time_of_day:
             time_of_day = get_time_of_day(user)
 
         # Determine cache eligibility before auto-merge
-        use_cache = not exclude_items and not include_items and not single_outfit
+        use_cache = not exclude_items and not include_items and not single_outfit and not user_request
 
         # Auto-exclude today's rejected items for this occasion
         rejected_ids = await self._get_today_rejected_item_ids(user, occasion)
@@ -805,6 +811,7 @@ class RecommendationService:
             occasion=occasion,
             body_measurements=getattr(user, "body_measurements", None),
             gender=getattr(user, "gender", None),
+            user_request=user_request,
         )
 
         prompt = RECOMMENDATION_PROMPT.format(

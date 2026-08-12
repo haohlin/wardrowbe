@@ -94,6 +94,11 @@ class WeatherOverrideRequest(BaseModel):
 
 class SuggestRequest(BaseModel):
     occasion: str | None = None
+    preference_note: str | None = Field(
+        None,
+        max_length=500,
+        description="Free-text preference or refinement for this suggestion",
+    )
 
     @field_validator("occasion")
     @classmethod
@@ -467,6 +472,7 @@ async def suggest_outfit(
             exclude_items=request.exclude_items,
             include_items=request.include_items,
             time_of_day=request.time_of_day,
+            user_request=request.preference_note,
         )
     except InsufficientWardrobeError as e:
         raise HTTPException(

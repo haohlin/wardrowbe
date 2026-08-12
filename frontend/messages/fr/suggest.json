@@ -27,6 +27,8 @@
     "yesWoreIt": "Oui, je l'ai portée"
   },
   "generating": "Création de votre look...",
+  "preference": { "description": "Facultatif : indiquez vos envies ou ce que vous souhaitez éviter aujourd’hui.", "placeholder": "Exemple : minimaliste, sans superpositions épaisses", "title": "Préférence pour cette suggestion" },
+  "refine": { "action": "Ajuster la suggestion", "description": "Décrivez le changement souhaité puis générez une version affinée.", "placeholder": "Exemple : plus épuré et moins volumineux", "title": "Ajuster cette suggestion" },
   "getSuggestion": "Obtenir une suggestion",
   "greeting": {
     "afternoon": "Bon après-midi",

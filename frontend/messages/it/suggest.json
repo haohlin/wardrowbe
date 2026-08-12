@@ -27,6 +27,8 @@
     "yesWoreIt": "Sì, l'ho indossato"
   },
   "generating": "Creazione del tuo look...",
+  "preference": { "description": "Facoltativo: indica cosa desideri o vuoi evitare oggi.", "placeholder": "Esempio: minimalista, senza strati ingombranti", "title": "Preferenza per questo suggerimento" },
+  "refine": { "action": "Modifica suggerimento", "description": "Descrivi la modifica e genera una versione affinata.", "placeholder": "Esempio: più pulito e meno voluminoso", "title": "Modifica questo suggerimento" },
   "getSuggestion": "Ottieni suggerimento",
   "greeting": {
     "afternoon": "Buon pomeriggio",

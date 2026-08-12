@@ -27,6 +27,8 @@
     "yesWoreIt": "是的，我穿了"
   },
   "generating": "正在为你搭配...",
+  "preference": { "description": "可选：告诉造型师今天想要或想避免什么。", "placeholder": "例如：简洁极简，不要厚重叠穿，今晚更保暖", "title": "本次推荐偏好" },
+  "refine": { "action": "调整推荐", "description": "说明想修改的地方，然后生成优化版本。", "placeholder": "例如：更简洁、少些臃肿", "title": "调整这套推荐" },
   "getSuggestion": "获取推荐",
   "greeting": {
     "afternoon": "下午好",

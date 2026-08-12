@@ -27,6 +27,8 @@
     "yesWoreIt": "はい、着ました"
   },
   "generating": "コーデを作成中...",
+  "preference": { "description": "任意：今日の希望や避けたいものを伝えてください。", "placeholder": "例：すっきりミニマル、厚い重ね着なし", "title": "今回の提案への希望" },
+  "refine": { "action": "提案を調整", "description": "変更したい点を伝えて、調整版を作成します。", "placeholder": "例：もっとすっきり、ボリュームを抑える", "title": "この提案を調整" },
   "getSuggestion": "提案を取得",
   "greeting": {
     "afternoon": "こんにちは",

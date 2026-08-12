@@ -329,6 +329,7 @@ export interface Outfit {
 
 export interface SuggestRequest {
   occasion: string;
+  preference_note?: string;
   weather_override?: {
     temperature: number;
     feels_like?: number;

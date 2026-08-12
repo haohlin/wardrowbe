@@ -27,6 +27,8 @@
     "yesWoreIt": "네, 입었어요"
   },
   "generating": "코디를 만들고 있어요...",
+  "preference": { "description": "선택 사항: 오늘 원하는 점이나 피하고 싶은 점을 알려주세요.", "placeholder": "예: 깔끔한 미니멀, 두꺼운 레이어 제외", "title": "이번 추천 선호사항" },
+  "refine": { "action": "추천 다듬기", "description": "바꿀 점을 알려주면 개선된 버전을 생성합니다.", "placeholder": "예: 더 깔끔하고 덜 부피감 있게", "title": "추천 조정" },
   "getSuggestion": "추천 받기",
   "greeting": {
     "afternoon": "좋은 오후예요",

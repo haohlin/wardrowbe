@@ -12,6 +12,7 @@ from app.services.recommendation_service import (
     RecommendationService,
     get_time_of_day,
 )
+from pydantic import ValidationError
 
 
 def _make_user(timezone: str = "UTC") -> User:
@@ -85,6 +86,13 @@ class TestGetTimeOfDay:
 
 
 class TestPromptTemplate:
+    def test_free_text_request_is_trimmed_into_prompt_context(self):
+        service = RecommendationService(None)
+
+        text = service._format_preferences_for_prompt(None, user_request="  less bulky  ")
+
+        assert "CURRENT USER REQUEST: less bulky" in text
+
     def test_gender_context_only_when_explicitly_set(self):
         service = RecommendationService(None)
 
@@ -144,6 +152,13 @@ class TestPromptTemplate:
 
 
 class TestSuggestRequestTimeOfDay:
+    def test_preference_note_is_bounded(self):
+        from app.api.outfits import SuggestRequest
+
+        assert SuggestRequest(preference_note="clean lines").preference_note == "clean lines"
+        with pytest.raises(ValidationError):
+            SuggestRequest(preference_note="x" * 501)
+
     @pytest.mark.asyncio
     async def test_suggest_accepts_time_of_day(self, client, test_user, auth_headers, db_session):
         from app.models.item import ClothingItem, ItemStatus

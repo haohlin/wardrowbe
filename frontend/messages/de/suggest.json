@@ -27,6 +27,8 @@
     "yesWoreIt": "Ja, ich habe es getragen"
   },
   "generating": "Dein Look wird erstellt...",
+  "preference": { "description": "Optional: Teile dem Stylisten heutige Wünsche oder Ausschlüsse mit.", "placeholder": "Beispiel: klar und minimalistisch, keine dicken Schichten", "title": "Wunsch für diesen Vorschlag" },
+  "refine": { "action": "Vorschlag anpassen", "description": "Beschreibe die gewünschte Änderung und erstelle eine neue Version.", "placeholder": "Beispiel: schlichter und weniger voluminös", "title": "Diesen Vorschlag anpassen" },
   "getSuggestion": "Vorschlag erhalten",
   "greeting": {
     "afternoon": "Guten Nachmittag",
