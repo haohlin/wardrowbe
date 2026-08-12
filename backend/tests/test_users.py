@@ -1,5 +1,12 @@
+from datetime import time
+from uuid import uuid4
+
 import pytest
 from httpx import AsyncClient
+
+from app.models.item import ClothingItem, ItemStatus
+from app.models.outfit import Outfit
+from app.models.schedule import Schedule
 
 
 class TestUserMe:
@@ -20,6 +27,66 @@ class TestUserMe:
         """Test that unauthorized request returns 401."""
         response = await client.get("/api/v1/users/me")
         assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_activation_reports_native_app_progress(
+        self, client: AsyncClient, test_user, auth_headers, db_session
+    ):
+        items = [
+            ClothingItem(
+                user_id=test_user.id,
+                type="shirt",
+                image_path=f"test/{uuid4()}.jpg",
+                status=ItemStatus.ready,
+            )
+            for _ in range(5)
+        ]
+        items.extend(
+            [
+                ClothingItem(
+                    user_id=test_user.id,
+                    type="shirt",
+                    image_path=f"test/{uuid4()}.jpg",
+                    status=ItemStatus.processing,
+                ),
+                ClothingItem(
+                    user_id=test_user.id,
+                    type="shirt",
+                    image_path=f"test/{uuid4()}.jpg",
+                    status=ItemStatus.ready,
+                    is_archived=True,
+                ),
+            ]
+        )
+        db_session.add_all(
+            [
+                *items,
+                Outfit(user_id=test_user.id, occasion="casual"),
+                Outfit(user_id=test_user.id, occasion="office"),
+                Schedule(
+                    user_id=test_user.id,
+                    day_of_week=0,
+                    notification_time=time(7, 0),
+                    enabled=True,
+                ),
+                Schedule(
+                    user_id=test_user.id,
+                    day_of_week=1,
+                    notification_time=time(8, 0),
+                    enabled=False,
+                ),
+            ]
+        )
+        await db_session.commit()
+
+        response = await client.get("/api/v1/users/me/activation", headers=auth_headers)
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "items_ready": 5,
+            "total_outfits": 2,
+            "active_schedules": 1,
+        }
 
 
 class TestUserUpdate:
