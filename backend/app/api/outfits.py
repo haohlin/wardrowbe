@@ -118,9 +118,21 @@ class SuggestRequest(BaseModel):
     weather_override: WeatherOverrideRequest | None = None
     exclude_items: list[UUID] = Field(default_factory=list, description="Items to exclude")
     include_items: list[UUID] = Field(default_factory=list, description="Items to include")
+    excluded_combinations: list[list[UUID]] = Field(
+        default_factory=list,
+        max_length=20,
+        description="Already displayed item combinations to exclude",
+    )
     force_generate: bool = Field(
         False, description="Skip reusable saved outfits and generate a fresh suggestion"
     )
+
+    @field_validator("excluded_combinations")
+    @classmethod
+    def validate_excluded_combinations(cls, combinations: list[list[UUID]]) -> list[list[UUID]]:
+        if any(len(combination) < 2 or len(combination) > 12 for combination in combinations):
+            raise ValueError("Each excluded combination must contain 2 to 12 item IDs")
+        return combinations
 
 
 class OutfitItemResponse(BaseModel):
@@ -482,6 +494,7 @@ async def suggest_outfit(
             include_items=request.include_items,
             time_of_day=request.time_of_day,
             user_request=request.preference_note,
+            excluded_combinations=request.excluded_combinations,
         )
     except InsufficientWardrobeError as e:
         raise HTTPException(
@@ -554,6 +567,7 @@ async def auto_suggest_outfits(
             time_of_day=request.time_of_day,
             user_request=request.preference_note,
             force_generate=request.force_generate,
+            excluded_combinations=request.excluded_combinations,
         )
     except InsufficientWardrobeError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from None

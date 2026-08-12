@@ -331,6 +331,7 @@ export interface SuggestRequest {
   occasion: string;
   preference_note?: string;
   force_generate?: boolean;
+  excluded_combinations?: string[][];
   weather_override?: {
     temperature: number;
     feels_like?: number;

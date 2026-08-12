@@ -86,6 +86,19 @@ class TestGetTimeOfDay:
 
 
 class TestPromptTemplate:
+    def test_session_exclusions_are_rendered_as_item_numbers(self):
+        service = RecommendationService(None)
+        first, second = uuid4(), uuid4()
+
+        text = service._format_preferences_for_prompt(
+            None,
+            number_map={1: first, 2: second},
+            excluded_combinations=[[first, second]],
+        )
+
+        assert "already shown" in text
+        assert "[1, 2]" in text
+
     def test_free_text_request_is_trimmed_into_prompt_context(self):
         service = RecommendationService(None)
 
@@ -152,6 +165,14 @@ class TestPromptTemplate:
 
 
 class TestSuggestRequestTimeOfDay:
+    def test_excluded_combinations_are_bounded(self):
+        from app.api.outfits import SuggestRequest
+
+        combo = [uuid4(), uuid4()]
+        assert SuggestRequest(excluded_combinations=[combo]).excluded_combinations == [combo]
+        with pytest.raises(ValidationError):
+            SuggestRequest(excluded_combinations=[combo] * 21)
+
     def test_preference_note_is_bounded(self):
         from app.api.outfits import SuggestRequest
 
@@ -334,6 +355,15 @@ class TestSavedOutfitReuse:
         assert result["mode"] == "generated"
         service._rank_reusable_outfits.assert_not_awaited()
         service.generate_recommendation.assert_awaited_once()
+
+    def test_exact_item_combination_is_detected_regardless_of_order(self):
+        service = RecommendationService(None)
+        first, second, third = uuid4(), uuid4(), uuid4()
+
+        assert service._combination_is_excluded(
+            [second, first], [[first, second], [first, third]]
+        )
+        assert not service._combination_is_excluded([first, second, third], [[first, second]])
 
 
 def _make_item(**kwargs) -> ClothingItem:

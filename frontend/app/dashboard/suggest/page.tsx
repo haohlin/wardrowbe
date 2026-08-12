@@ -488,6 +488,7 @@ export default function SuggestPage() {
   const [weatherOverride, setWeatherOverride] = useState<WeatherOverride | null>(null);
   const [preferenceNote, setPreferenceNote] = useState('');
   const [refinementNote, setRefinementNote] = useState('');
+  const [shownOutfitCombos, setShownOutfitCombos] = useState<string[][]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [outfit, setOutfit] = useState<Outfit | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -516,6 +517,9 @@ export default function SuggestPage() {
       const note = (noteOverride ?? preferenceNote).trim();
       if (note) request.preference_note = note;
       if (forceGenerate) request.force_generate = true;
+      if (shownOutfitCombos.length > 0) {
+        request.excluded_combinations = shownOutfitCombos;
+      }
 
       if (weatherOverride) {
         request.weather_override = {
@@ -531,7 +535,16 @@ export default function SuggestPage() {
         { type: 'outfit-suggestion', label: t('generating') },
         () => api.post<AutoSuggestResponse>('/outfits/suggest/auto', request)
       );
-      setOutfit(result.outfits[0] ?? null);
+      const nextOutfit = result.outfits[0] ?? null;
+      setOutfit(nextOutfit);
+      if (nextOutfit) {
+        const combination = nextOutfit.items.map((item) => item.id).sort();
+        setShownOutfitCombos((current) => {
+          const key = combination.join(':');
+          if (current.some((existing) => [...existing].sort().join(':') === key)) return current;
+          return [...current, combination].slice(-20);
+        });
+      }
       setRefinementNote('');
     } catch (err) {
       if (err instanceof ApiError) {
@@ -563,7 +576,7 @@ export default function SuggestPage() {
 
   const handleTryAnother = () => {
     setOutfit(null);
-    void handleGenerate(undefined, true);
+    void handleGenerate();
   };
 
   const handleRefine = () => {
@@ -594,6 +607,7 @@ export default function SuggestPage() {
     setSelectedOccasion(null);
     setPreferenceNote('');
     setRefinementNote('');
+    setShownOutfitCombos([]);
     setError(null);
   };
 

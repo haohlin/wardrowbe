@@ -109,7 +109,12 @@ class RecommendationService:
             ) from error
 
     async def _rank_reusable_outfits(
-        self, user: User, occasion: str, weather: WeatherData, limit: int = 6
+        self,
+        user: User,
+        occasion: str,
+        weather: WeatherData,
+        limit: int = 6,
+        excluded_combinations: list[list[UUID]] | None = None,
     ) -> list[Outfit]:
         result = await self.db.execute(
             select(Outfit)
@@ -161,8 +166,24 @@ class RecommendationService:
             score += min(len(outfit.items or []), 5)
             return score
 
+        outfits = [
+            outfit
+            for outfit in outfits
+            if not self._combination_is_excluded(
+                [outfit_item.item_id for outfit_item in outfit.items], excluded_combinations
+            )
+        ]
         ranked = sorted(outfits, key=suitability, reverse=True)
         return [outfit for outfit in ranked if suitability(outfit) >= 45][:limit]
+
+    @staticmethod
+    def _combination_is_excluded(
+        item_ids: list[UUID], excluded_combinations: list[list[UUID]] | None
+    ) -> bool:
+        selected = frozenset(item_ids)
+        return bool(selected) and any(
+            selected == frozenset(combination) for combination in (excluded_combinations or [])
+        )
 
     async def auto_suggest_outfits(
         self,
@@ -172,10 +193,13 @@ class RecommendationService:
         time_of_day: str | None = None,
         user_request: str | None = None,
         force_generate: bool = False,
+        excluded_combinations: list[list[UUID]] | None = None,
     ) -> dict:
         weather = await self._get_weather_for_context(user, weather_override)
         if not force_generate and not (user_request and user_request.strip()):
-            reusable = await self._rank_reusable_outfits(user, occasion, weather)
+            reusable = await self._rank_reusable_outfits(
+                user, occasion, weather, excluded_combinations=excluded_combinations
+            )
             if reusable:
                 return {"mode": "existing", "outfits": reusable, "generated": False}
 
@@ -185,6 +209,7 @@ class RecommendationService:
             weather_override=weather,
             time_of_day=time_of_day,
             user_request=user_request,
+            excluded_combinations=excluded_combinations,
         )
         return {"mode": "generated", "outfits": [generated], "generated": True}
 
@@ -397,6 +422,7 @@ class RecommendationService:
         body_measurements: dict | None = None,
         gender: str | None = None,
         user_request: str | None = None,
+        excluded_combinations: list[list[UUID]] | None = None,
     ) -> str:
         lines = []
 
@@ -496,6 +522,23 @@ class RecommendationService:
             if worn_sets:
                 lines.append(
                     f"- Recently worn outfits (prefer variety, only repeat if necessary): {', '.join(worn_sets)}"
+                )
+
+        if excluded_combinations and number_map:
+            uuid_to_number = {item_id: number for number, item_id in number_map.items()}
+            excluded_sets = []
+            for combination in excluded_combinations:
+                numbers = sorted(
+                    uuid_to_number[item_id]
+                    for item_id in combination
+                    if item_id in uuid_to_number
+                )
+                if numbers:
+                    excluded_sets.append("[" + ", ".join(map(str, numbers)) + "]")
+            if excluded_sets:
+                lines.append(
+                    "- Do not repeat these already shown outfit combinations: "
+                    + ", ".join(excluded_sets)
                 )
 
         if lines:
@@ -761,6 +804,7 @@ class RecommendationService:
         single_outfit: bool = False,
         scheduled_date: date | None = None,
         user_request: str | None = None,
+        excluded_combinations: list[list[UUID]] | None = None,
     ) -> Outfit:
         # Guard first so deferral is unconditional, before any location/weather work.
         require_internal_ai("text")
@@ -773,7 +817,13 @@ class RecommendationService:
             time_of_day = get_time_of_day(user)
 
         # Determine cache eligibility before auto-merge
-        use_cache = not exclude_items and not include_items and not single_outfit and not user_request
+        use_cache = (
+            not exclude_items
+            and not include_items
+            and not single_outfit
+            and not user_request
+            and not excluded_combinations
+        )
 
         # Auto-exclude today's rejected items for this occasion
         rejected_ids = await self._get_today_rejected_item_ids(user, occasion)
@@ -894,6 +944,7 @@ class RecommendationService:
             body_measurements=getattr(user, "body_measurements", None),
             gender=getattr(user, "gender", None),
             user_request=user_request,
+            excluded_combinations=excluded_combinations,
         )
 
         prompt = RECOMMENDATION_PROMPT.format(
@@ -935,6 +986,16 @@ class RecommendationService:
                     outfit_data = outfit_data[0]
                 if not isinstance(outfit_data, dict):
                     raise ValueError(f"Expected dict, got {type(outfit_data)}")
+                selected_ids = [
+                    number_map[int(number)]
+                    for number in outfit_data.get("items", [])
+                    if str(number).isdigit() and int(number) in number_map
+                ]
+                if self._combination_is_excluded(selected_ids, excluded_combinations):
+                    raise AIRecommendationError(
+                        "No different complete outfit is available for this scenario. "
+                        "Try changing the preference, occasion, or adding more ready wardrobe items."
+                    )
                 outfit_data["_ai_model"] = result.model
                 outfit_data["_ai_endpoint"] = result.endpoint
                 return await self._materialize_outfit(
@@ -949,6 +1010,24 @@ class RecommendationService:
 
             # Multi-outfit parse
             outfit_list = self._parse_multi_outfit_response(result.content)
+            if excluded_combinations:
+                outfit_list = [
+                    option
+                    for option in outfit_list
+                    if not self._combination_is_excluded(
+                        [
+                            number_map[int(number)]
+                            for number in option.get("items", [])
+                            if str(number).isdigit() and int(number) in number_map
+                        ],
+                        excluded_combinations,
+                    )
+                ]
+            if not outfit_list:
+                raise AIRecommendationError(
+                    "No different complete outfit is available for this scenario. "
+                    "Try changing the preference, occasion, or adding more ready wardrobe items."
+                )
 
             first = outfit_list[0]
             first["_ai_model"] = result.model
