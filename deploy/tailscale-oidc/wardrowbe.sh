@@ -6,26 +6,71 @@ repo_root="$(cd "$deploy_dir/../.." && pwd -P)"
 runtime_dir="$deploy_dir/runtime"
 app_env="$runtime_dir/wardrowbe.env"
 
-load_runtime() {
+require_runtime() {
   if [[ ! -f "$app_env" ]]; then
     echo "Missing $app_env; run setup.sh first" >&2
     exit 1
   fi
+}
+
+run_backend() {
+  exec >>"$runtime_dir/backend.log" 2>&1
+  require_runtime
   set -a
+  # shellcheck disable=SC1091
+  source "$repo_root/backend/.env"
   # shellcheck disable=SC1090
   source "$app_env"
   set +a
   export DEBUG="false"
+  cd "$repo_root/backend"
+  exec ../.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001 --no-access-log
+}
+
+run_worker() {
+  exec >>"$runtime_dir/worker.log" 2>&1
+  require_runtime
+  set -a
+  # shellcheck disable=SC1091
+  source "$repo_root/backend/.env"
+  # shellcheck disable=SC1090
+  source "$app_env"
+  set +a
+  export DEBUG="false"
+  cd "$repo_root/backend"
+  exec ../.venv/bin/arq app.workers.worker.WorkerSettings
+}
+
+run_frontend() {
+  exec >>"$runtime_dir/frontend.log" 2>&1
+  require_runtime
+  set -a
+  # shellcheck disable=SC1091
+  source "$repo_root/frontend/.env.local"
+  # shellcheck disable=SC1090
+  source "$app_env"
+  set +a
   export DEV_MODE="false"
+  export PATH="${NPM_BIN%/*}:$PATH"
+  cd "$repo_root/frontend"
+  exec "$NPM_BIN" run dev -- --hostname 127.0.0.1 --port 3000
 }
 
 is_running() {
-  local pid_file="$1"
-  [[ -f "$pid_file" ]] && kill -0 "$(cat "$pid_file")" 2>/dev/null
+  local name="$1"
+  local job_label="com.wardrowbe.$name"
+  launchctl print "gui/$(id -u)/$job_label" 2>/dev/null | grep -q 'state = running'
+}
+
+start_job() {
+  local name="$1"
+  local job_label="com.wardrowbe.$name"
+  launchctl remove "$job_label" 2>/dev/null || true
+  launchctl submit -l "$job_label" -- "$deploy_dir/wardrowbe.sh" "__$name"
 }
 
 start_processes() {
-  load_runtime
+  require_runtime
   mkdir -p "$runtime_dir"
   chmod 700 "$runtime_dir"
 
@@ -35,44 +80,9 @@ start_processes() {
     exit 1
   fi
 
-  (
-    set -a
-    # shellcheck disable=SC1091
-    source "$repo_root/backend/.env"
-    # shellcheck disable=SC1090
-    source "$app_env"
-    set +a
-    export DEBUG="false"
-    cd "$repo_root/backend"
-    exec ../.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001 --no-access-log
-  ) >>"$runtime_dir/backend.log" 2>&1 &
-  echo "$!" >"$runtime_dir/backend.pid"
-
-  (
-    set -a
-    # shellcheck disable=SC1091
-    source "$repo_root/backend/.env"
-    # shellcheck disable=SC1090
-    source "$app_env"
-    set +a
-    export DEBUG="false"
-    cd "$repo_root/backend"
-    exec ../.venv/bin/arq app.workers.worker.WorkerSettings
-  ) >>"$runtime_dir/worker.log" 2>&1 &
-  echo "$!" >"$runtime_dir/worker.pid"
-
-  (
-    set -a
-    # shellcheck disable=SC1091
-    source "$repo_root/frontend/.env.local"
-    # shellcheck disable=SC1090
-    source "$app_env"
-    set +a
-    export DEV_MODE="false"
-    cd "$repo_root/frontend"
-    exec npm run dev -- --hostname 127.0.0.1 --port 3000
-  ) >>"$runtime_dir/frontend.log" 2>&1 &
-  echo "$!" >"$runtime_dir/frontend.pid"
+  start_job backend
+  start_job worker
+  start_job frontend
 
   for _ in {1..30}; do
     if curl --noproxy '*' --fail --silent http://127.0.0.1:8001/api/v1/health >/dev/null && \
@@ -89,29 +99,25 @@ start_processes() {
 
 stop_one() {
   local name="$1"
-  local pid_file="$runtime_dir/$name.pid"
-  if ! is_running "$pid_file"; then
-    rm -f "$pid_file"
+  local job_label="com.wardrowbe.$name"
+  if ! launchctl print "gui/$(id -u)/$job_label" >/dev/null 2>&1; then
     return
   fi
-  local pid
-  pid="$(cat "$pid_file")"
-  kill -TERM "$pid"
+  launchctl remove "$job_label"
   for _ in {1..20}; do
-    if ! kill -0 "$pid" 2>/dev/null; then
-      rm -f "$pid_file"
+    if ! launchctl print "gui/$(id -u)/$job_label" >/dev/null 2>&1; then
       return
     fi
     sleep 0.25
   done
-  echo "$name did not stop after SIGTERM" >&2
+  echo "$name launchd job did not stop" >&2
   return 1
 }
 
 status_processes() {
   local failed=0
   for name in backend worker frontend; do
-    if is_running "$runtime_dir/$name.pid"; then
+    if is_running "$name"; then
       echo "$name: running"
     else
       echo "$name: stopped"
@@ -122,6 +128,9 @@ status_processes() {
 }
 
 case "${1:-}" in
+  __backend) run_backend ;;
+  __worker) run_worker ;;
+  __frontend) run_frontend ;;
   start) start_processes ;;
   stop)
     stop_one frontend

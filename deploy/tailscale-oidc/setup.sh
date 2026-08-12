@@ -7,7 +7,7 @@ runtime_dir="$deploy_dir/runtime"
 runtime_env="$runtime_dir/runtime.env"
 app_env="$runtime_dir/wardrowbe.env"
 
-for command_name in tailscale jq docker curl openssl htpasswd uuidgen; do
+for command_name in tailscale jq docker curl openssl htpasswd uuidgen npm; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     echo "Missing required command: $command_name" >&2
     exit 1
@@ -40,10 +40,14 @@ verify_existing_owner() {
     # shellcheck disable=SC1091
     source "$repo_root/backend/.env"
     set +a
-    PYTHONPATH="$repo_root/backend" "$repo_root/.venv/bin/python" - "$owner_email" <<'PY'
+    PYTHONPATH="$repo_root/backend" "$repo_root/.venv/bin/python" - \
+      "$owner_email" \
+      "${WARDROWBE_MIGRATE_OWNER_EMAIL:-0}" \
+      "$runtime_dir/owner-email-before-migration" <<'PY'
 import asyncio
 import os
 import sys
+from pathlib import Path
 
 import asyncpg
 
@@ -52,13 +56,43 @@ async def main() -> None:
     database_url = os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://", 1)
     connection = await asyncpg.connect(database_url)
     try:
-        total = await connection.fetchval("SELECT count(*) FROM users")
-        matching = await connection.fetchval(
-            "SELECT count(*) FROM users WHERE lower(email) = lower($1)", sys.argv[1]
-        )
+        async with connection.transaction():
+            total = await connection.fetchval("SELECT count(*) FROM users")
+            matching = await connection.fetchval(
+                "SELECT count(*) FROM users WHERE lower(email) = lower($1)",
+                sys.argv[1],
+            )
+            result = "empty" if total == 0 else "match" if matching else "mismatch"
+
+            if result == "mismatch" and sys.argv[2] == "1":
+                rows = await connection.fetch(
+                    """
+                    SELECT u.id, u.email, count(i.id) AS item_count
+                    FROM users u
+                    LEFT JOIN clothing_items i ON i.user_id = u.id
+                    GROUP BY u.id, u.email
+                    ORDER BY item_count DESC
+                    """
+                )
+                populated = [row for row in rows if row["item_count"] > 0]
+                if len(populated) != 1:
+                    result = "ambiguous"
+                else:
+                    owner = populated[0]
+                    audit_path = Path(sys.argv[3])
+                    audit_path.write_text(
+                        f"USER_ID={owner['id']}\nPREVIOUS_EMAIL={owner['email']}\n"
+                    )
+                    audit_path.chmod(0o600)
+                    await connection.execute(
+                        "UPDATE users SET email = $1 WHERE id = $2",
+                        sys.argv[1].lower(),
+                        owner["id"],
+                    )
+                    result = "migrated"
     finally:
         await connection.close()
-    print("empty" if total == 0 else "match" if matching else "mismatch")
+    print(result)
 
 
 asyncio.run(main())
@@ -71,6 +105,13 @@ PY
   if [[ "$result" == "mismatch" ]]; then
     echo "Tailscale login does not match any existing Wardrowbe user; refusing account split" >&2
     return 1
+  fi
+  if [[ "$result" == "ambiguous" ]]; then
+    echo "Unable to identify one populated Wardrowbe owner; refusing email migration" >&2
+    return 1
+  fi
+  if [[ "$result" == "migrated" ]]; then
+    echo "Migrated populated Wardrowbe owner email to the Tailscale login"
   fi
 }
 
@@ -145,6 +186,7 @@ fi
     -e '/^no_proxy=/p' \
     "$runtime_env"
 } >"$app_env"
+printf 'NPM_BIN=%s\n' "$(command -v npm)" >>"$app_env"
 chmod 600 "$app_env"
 
 python3 "$deploy_dir/render_config.py" \
