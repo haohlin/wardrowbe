@@ -22,6 +22,14 @@ def test_setup_adds_only_private_serve_routes():
     assert "tailscale funnel" not in setup
     assert "serve reset" not in setup
     assert "htpasswd -nBC 12" in setup
+    assert "NPM_BIN=" in setup
+
+
+def test_setup_owner_email_migration_is_explicit_and_recoverable():
+    setup = read("setup.sh")
+    assert "WARDROWBE_MIGRATE_OWNER_EMAIL" in setup
+    assert "owner-email-before-migration" in setup
+    assert "item_count" in setup
 
 
 def test_wardrowbe_runtime_forces_oidc_and_loopback():
@@ -32,6 +40,12 @@ def test_wardrowbe_runtime_forces_oidc_and_loopback():
     assert 'export DEV_MODE="false"' in runtime
     assert "--host 127.0.0.1 --port 8001" in runtime
     assert "--hostname 127.0.0.1 --port 3000" in runtime
+    assert 'exec "$NPM_BIN" run dev' in runtime
+    assert 'export PATH="${NPM_BIN%/*}:$PATH"' in runtime
+    assert "launchctl submit" in runtime
+    assert 'job_label="com.wardrowbe.$name"' in runtime
+    assert '"$deploy_dir/wardrowbe.sh" "__$name"' in runtime
+    assert 'launchctl remove "$job_label"' in runtime
 
 
 def test_check_requires_mobile_client_and_dev_mode_off():

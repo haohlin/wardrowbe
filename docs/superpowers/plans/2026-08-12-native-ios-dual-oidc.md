@@ -14,7 +14,7 @@
 - Keep Next.js, FastAPI, Dex, PostgreSQL, and Redis bound to loopback.
 - Keep Tailscale Funnel disabled; use Serve only.
 - Never persist or print the plaintext local password.
-- Keep generated secrets, hashes, Dex state, PIDs, and logs under ignored `deploy/tailscale-oidc/runtime/`.
+- Keep generated secrets, hashes, Dex state references, migration records, and logs under ignored `deploy/tailscale-oidc/runtime/`.
 - Official iOS app server origin is `https://g7x9r272rq.tail37713f.ts.net:8445`; app adds `/api/v1` itself.
 - Mobile OIDC callback is `https://g7x9r272rq.tail37713f.ts.net:8445/api/v1/auth/mobile-callback`.
 
@@ -106,7 +106,7 @@ git commit -m "feat(auth): support stable dual OIDC sessions"
 **Interfaces:**
 - `render_config.py ENV_FILE TEMPLATE OUTPUT` reads mode-600 generated values and atomically writes mode-600 Dex YAML.
 - `setup.sh` generates runtime secrets/hash, starts Dex, configures only Serve 8445/8446, and never resets existing Serve handlers.
-- `wardrowbe.sh start|stop|status` manages loopback frontend/backend/worker processes with PID files.
+- `wardrowbe.sh start|stop|status` manages loopback frontend/backend/worker processes as scoped macOS launchd jobs.
 - `check.sh` exits nonzero unless Dex discovery, Wardrowbe auth config, callback, and both Serve origins work.
 
 - [ ] **Step 1: Write failing renderer and script-policy tests**

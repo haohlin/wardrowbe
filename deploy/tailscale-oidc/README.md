@@ -5,8 +5,9 @@ publishes only two private HTTPS origins to devices in the same tailnet.
 
 ## First setup
 
-Docker Desktop, Tailscale, PostgreSQL, Redis, and the existing Wardrowbe app
-environment must already be available on the Mac.
+A running local Docker engine (Colima or Docker Desktop), Tailscale, PostgreSQL,
+Redis, and the existing Wardrowbe app environment must already be available on
+the Mac.
 
 ```bash
 WARDROWBE_GENERATE_PASSWORD=1 ./deploy/tailscale-oidc/setup.sh
@@ -17,6 +18,16 @@ WARDROWBE_GENERATE_PASSWORD=1 ./deploy/tailscale-oidc/setup.sh
 The generated Email-login password is copied to the Mac clipboard. It is never
 printed or written to disk. Without `WARDROWBE_GENERATE_PASSWORD=1`, setup asks
 for a password interactively.
+
+If the populated Wardrowbe account still uses an older development email,
+setup refuses to split it from the Tailscale identity. When exactly one account
+owns wardrobe items, explicitly migrate that account and retain a private
+rollback record with:
+
+```bash
+WARDROWBE_MIGRATE_OWNER_EMAIL=1 WARDROWBE_GENERATE_PASSWORD=1 \
+  ./deploy/tailscale-oidc/setup.sh
+```
 
 In the official iOS app, enter exactly:
 
@@ -45,9 +56,10 @@ OIDC identities to one internal user and one wardrobe.
 ./deploy/tailscale-oidc/wardrowbe.sh stop
 ```
 
-Generated secrets, the password hash, logs, and PID files live in the ignored,
-mode-700 `deploy/tailscale-oidc/runtime/` directory. The Dex database lives in
-the Docker volume `wardrowbe-tailscale-oidc_dex-data`.
+Generated secrets, the password hash, logs, and any migration rollback record
+live in the ignored, mode-700 `deploy/tailscale-oidc/runtime/` directory. The
+three Wardrowbe processes run as scoped macOS launchd jobs. The Dex database
+lives in the Docker volume `wardrowbe-tailscale-oidc_dex-data`.
 
 Back up both the runtime directory and Dex volume while Wardrowbe and Dex are
 stopped. Protect the backup like a password database. Test restoring it before
