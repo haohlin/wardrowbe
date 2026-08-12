@@ -85,6 +85,14 @@ class TestGetTimeOfDay:
 
 
 class TestPromptTemplate:
+    def test_gender_context_only_when_explicitly_set(self):
+        service = RecommendationService(None)
+
+        assert "Gender identity" not in service._format_preferences_for_prompt(None)
+        assert "Gender identity for fit and styling context: non binary" in (
+            service._format_preferences_for_prompt(None, gender="non_binary")
+        )
+
     def test_prompt_contains_fashion_principles(self):
         from app.services.recommendation_service import RECOMMENDATION_PROMPT
 

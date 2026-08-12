@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { usePreferences, useUpdatePreferences, useResetPreferences, useTestAIEndpoint } from '@/lib/hooks/use-preferences';
-import { useUserProfile, useUpdateUserProfile } from '@/lib/hooks/use-user';
+import { Gender, useUserProfile, useUpdateUserProfile } from '@/lib/hooks/use-user';
 import {
   getNetworkLocationUrl,
   formatReverseGeocodedLocation,
@@ -192,6 +192,8 @@ export default function SettingsPage() {
   type UnitSystem = 'metric' | 'imperial';
   const [measurements, setMeasurements] = useState<Record<string, string>>({});
   const [measurementsDirty, setMeasurementsDirty] = useState(false);
+  const [gender, setGender] = useState('');
+  const [genderDirty, setGenderDirty] = useState(false);
   const [unitSystem, setUnitSystem] = useState<UnitSystem>(() => {
     if (typeof window !== 'undefined') {
       return (localStorage.getItem('wardrowbe_unit_system') as UnitSystem) || 'metric';
@@ -210,6 +212,8 @@ export default function SettingsPage() {
       setLocationLat(userProfile.location_lat?.toString() || '');
       setLocationLon(userProfile.location_lon?.toString() || '');
       setTimezone(userProfile.timezone || 'UTC');
+      setGender(userProfile.gender || '');
+      setGenderDirty(false);
 
       if (userProfile.body_measurements) {
         const initial: Record<string, string> = {};
@@ -377,7 +381,7 @@ export default function SettingsPage() {
     timezone !== (userProfile.timezone || 'UTC')
   );
 
-  const isDirty = hasChanges || measurementsDirty || !!hasLocationChanges;
+  const isDirty = hasChanges || measurementsDirty || genderDirty || !!hasLocationChanges;
 
   useEffect(() => {
     if (!isDirty) return;
@@ -422,6 +426,23 @@ export default function SettingsPage() {
   const handleMeasurementChange = (key: string, value: string) => {
     setMeasurements((prev) => ({ ...prev, [key]: value }));
     setMeasurementsDirty(true);
+  };
+
+  const handleGenderChange = (value: string) => {
+    setGender(value === 'unspecified' ? '' : value);
+    setGenderDirty(true);
+  };
+
+  const handleSaveGender = async () => {
+    try {
+      await updateUserProfile.mutateAsync({
+        gender: (gender || null) as Gender | null,
+      });
+      setGenderDirty(false);
+      toast.success(t('gender.saved'));
+    } catch (e) {
+      toast.error(getErrorMessage(e, t('gender.saveError')));
+    }
   };
 
   const handleSaveMeasurements = async () => {
@@ -585,6 +606,42 @@ export default function SettingsPage() {
                 <Input value={userProfile?.email || ''} disabled />
               </div>
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Optional Gender Profile */}
+        <Card>
+          <CardHeader>
+            <CardTitle>{t('gender.title')}</CardTitle>
+            <CardDescription>{t('gender.description')}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label>{t('gender.label')}</Label>
+              <Select value={gender || 'unspecified'} onValueChange={handleGenderChange}>
+                <SelectTrigger>
+                  <SelectValue placeholder={t('gender.placeholder')} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="unspecified">{t('gender.options.unspecified')}</SelectItem>
+                  <SelectItem value="female">{t('gender.options.female')}</SelectItem>
+                  <SelectItem value="male">{t('gender.options.male')}</SelectItem>
+                  <SelectItem value="non_binary">{t('gender.options.nonBinary')}</SelectItem>
+                  <SelectItem value="prefer_not_to_say">{t('gender.options.preferNotToSay')}</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-sm text-muted-foreground">{t('gender.help')}</p>
+            </div>
+            {genderDirty && (
+              <Button onClick={handleSaveGender} disabled={updateUserProfile.isPending} size="sm">
+                {updateUserProfile.isPending ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="mr-2 h-4 w-4" />
+                )}
+                {t('gender.save')}
+              </Button>
+            )}
           </CardContent>
         </Card>
 

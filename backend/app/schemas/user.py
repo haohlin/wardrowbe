@@ -1,5 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
@@ -16,6 +17,7 @@ class UserBase(BaseModel):
     location_lat: Decimal | None = Field(None, ge=-90, le=90)
     location_lon: Decimal | None = Field(None, ge=-180, le=180)
     location_name: str | None = Field(None, max_length=100)
+    gender: Literal["female", "male", "non_binary", "prefer_not_to_say"] | None = None
 
 
 class UserCreate(UserBase):
@@ -30,6 +32,7 @@ class UserUpdate(BaseModel):
     location_lat: Decimal | None = Field(None, ge=-90, le=90)
     location_lon: Decimal | None = Field(None, ge=-180, le=180)
     location_name: str | None = Field(None, max_length=100)
+    gender: Literal["female", "male", "non_binary", "prefer_not_to_say"] | None = None
 
 
 class UserResponse(UserBase):

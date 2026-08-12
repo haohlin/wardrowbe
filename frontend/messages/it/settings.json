@@ -5,6 +5,17 @@
     "name": "Nome",
     "title": "Account"
   },
+  "gender": {
+    "description": "Contesto facoltativo per suggerimenti sensibili alla vestibilità",
+    "help": "Lascia il campo non specificato se non vuoi usarlo nei consigli.",
+    "label": "Identità di genere",
+    "options": { "female": "Donna", "male": "Uomo", "nonBinary": "Non binario", "preferNotToSay": "Preferisco non dirlo", "unspecified": "Non specificato" },
+    "placeholder": "Seleziona genere",
+    "save": "Salva genere",
+    "saveError": "Impossibile salvare il genere",
+    "saved": "Genere salvato",
+    "title": "Identità di genere"
+  },
   "aiEndpoints": {
     "active": "Attivo",
     "addEndpoint": "Aggiungi endpoint",

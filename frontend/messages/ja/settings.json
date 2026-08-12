@@ -5,6 +5,17 @@
     "name": "名前",
     "title": "アカウント"
   },
+  "gender": {
+    "description": "体型に合うコーデ提案のための任意情報です",
+    "help": "提案に使用したくない場合は未設定にしてください。",
+    "label": "ジェンダーアイデンティティ",
+    "options": { "female": "女性", "male": "男性", "nonBinary": "ノンバイナリー", "preferNotToSay": "回答しない", "unspecified": "未設定" },
+    "placeholder": "性別を選択",
+    "save": "性別を保存",
+    "saveError": "性別を保存できませんでした",
+    "saved": "性別を保存しました",
+    "title": "ジェンダーアイデンティティ"
+  },
   "aiEndpoints": {
     "active": "有効",
     "addEndpoint": "エンドポイントを追加",

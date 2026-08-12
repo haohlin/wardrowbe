@@ -60,6 +60,35 @@ class TestUserUpdate:
         assert float(data["location_lat"]) == pytest.approx(40.7128, rel=1e-4)
         assert float(data["location_lon"]) == pytest.approx(-74.0060, rel=1e-4)
 
+    @pytest.mark.asyncio
+    async def test_gender_is_optional(self, client: AsyncClient, test_user, auth_headers):
+        response = await client.get("/api/v1/users/me", headers=auth_headers)
+
+        assert response.status_code == 200
+        assert response.json()["gender"] is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("gender", ["female", "male", "non_binary", "prefer_not_to_say"])
+    async def test_update_gender(self, client: AsyncClient, test_user, auth_headers, gender):
+        response = await client.patch(
+            "/api/v1/users/me",
+            json={"gender": gender},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        assert response.json()["gender"] == gender
+
+    @pytest.mark.asyncio
+    async def test_rejects_unknown_gender(self, client: AsyncClient, test_user, auth_headers):
+        response = await client.patch(
+            "/api/v1/users/me",
+            json={"gender": "other-value"},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 422
+
 
 class TestUserLocale:
     @pytest.mark.asyncio

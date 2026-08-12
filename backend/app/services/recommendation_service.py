@@ -288,8 +288,14 @@ class RecommendationService:
         number_map: dict[int, UUID] | None = None,
         occasion: str | None = None,
         body_measurements: dict | None = None,
+        gender: str | None = None,
     ) -> str:
         lines = []
+
+        if gender:
+            lines.append(
+                f"- Gender identity for fit and styling context: {gender.replace('_', ' ')}"
+            )
 
         if body_measurements:
             m = body_measurements
@@ -798,6 +804,7 @@ class RecommendationService:
             number_map,
             occasion=occasion,
             body_measurements=getattr(user, "body_measurements", None),
+            gender=getattr(user, "gender", None),
         )
 
         prompt = RECOMMENDATION_PROMPT.format(

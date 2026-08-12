@@ -5,6 +5,17 @@
     "name": "Nom",
     "title": "Compte"
   },
+  "gender": {
+    "description": "Contexte facultatif pour des suggestions adaptées à la morphologie",
+    "help": "Laissez ce champ vide si vous ne souhaitez pas l’utiliser dans les recommandations.",
+    "label": "Identité de genre",
+    "options": { "female": "Femme", "male": "Homme", "nonBinary": "Non binaire", "preferNotToSay": "Préfère ne pas répondre", "unspecified": "Non précisé" },
+    "placeholder": "Sélectionner le genre",
+    "save": "Enregistrer le genre",
+    "saveError": "Échec de l’enregistrement du genre",
+    "saved": "Genre enregistré",
+    "title": "Identité de genre"
+  },
   "aiEndpoints": {
     "active": "Actif",
     "addEndpoint": "Ajouter un point de terminaison",

@@ -5,6 +5,17 @@
     "name": "名稱",
     "title": "帳號"
   },
+  "gender": {
+    "description": "用於更貼合身形的穿搭建議，可選填",
+    "help": "若不希望推薦使用此資訊，請保持未指定。",
+    "label": "性別認同",
+    "options": { "female": "女性", "male": "男性", "nonBinary": "非二元性別", "preferNotToSay": "不願透露", "unspecified": "未指定" },
+    "placeholder": "選擇性別",
+    "save": "儲存性別",
+    "saveError": "儲存性別失敗",
+    "saved": "性別已儲存",
+    "title": "性別認同"
+  },
   "aiEndpoints": {
     "active": "使用中",
     "addEndpoint": "新增端點",

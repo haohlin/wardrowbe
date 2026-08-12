@@ -5,6 +5,17 @@
     "name": "이름",
     "title": "계정"
   },
+  "gender": {
+    "description": "핏을 고려한 코디 추천을 위한 선택 정보",
+    "help": "추천에 사용하지 않으려면 지정하지 않음으로 두세요.",
+    "label": "성 정체성",
+    "options": { "female": "여성", "male": "남성", "nonBinary": "논바이너리", "preferNotToSay": "응답하지 않음", "unspecified": "지정하지 않음" },
+    "placeholder": "성별 선택",
+    "save": "성별 저장",
+    "saveError": "성별 저장 실패",
+    "saved": "성별 저장됨",
+    "title": "성 정체성"
+  },
   "aiEndpoints": {
     "active": "활성",
     "addEndpoint": "엔드포인트 추가",

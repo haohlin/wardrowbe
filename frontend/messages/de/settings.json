@@ -5,6 +5,17 @@
     "name": "Name",
     "title": "Konto"
   },
+  "gender": {
+    "description": "Optionaler Kontext für passformgerechte Outfit-Vorschläge",
+    "help": "Nicht angeben, wenn dies nicht für Empfehlungen verwendet werden soll.",
+    "label": "Geschlechtsidentität",
+    "options": { "female": "Weiblich", "male": "Männlich", "nonBinary": "Nicht-binär", "preferNotToSay": "Keine Angabe", "unspecified": "Nicht angegeben" },
+    "placeholder": "Geschlecht auswählen",
+    "save": "Geschlecht speichern",
+    "saveError": "Geschlecht konnte nicht gespeichert werden",
+    "saved": "Geschlecht gespeichert",
+    "title": "Geschlechtsidentität"
+  },
   "aiEndpoints": {
     "active": "Aktiv",
     "addEndpoint": "Endpunkt hinzufügen",
