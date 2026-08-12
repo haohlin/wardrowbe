@@ -1,0 +1,10 @@
+flowchart LR
+  U[Authenticated user] --> C[User-owned endpoint configuration]
+  C --> P[Application destination validation]
+  P --> B[Backend and worker]
+  B --> G[Outbound egress gateway]
+  A[Administrator policy and credentials] --> G
+  G --> N[Approved network destinations]
+  D[Default-deny direct egress] -. blocks .-> B
+  O[OIDC provider] --> F[Next.js auth]
+  CA[Scoped CA or public PKI] --> F

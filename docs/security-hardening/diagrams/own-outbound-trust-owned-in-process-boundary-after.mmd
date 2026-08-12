@@ -1,0 +1,9 @@
+flowchart LR
+  U[Authenticated user] --> C[User-owned endpoint configuration]
+  C --> P[Owned destination and redirect policy]
+  A[Administrator allowlist and credential bindings] --> P
+  P --> B[Policy-built HTTP clients]
+  B --> N[Approved network destinations]
+  K[Destination-scoped credential] --> B
+  O[OIDC provider] --> F[Next.js auth]
+  CA[Scoped CA or public PKI] --> F
