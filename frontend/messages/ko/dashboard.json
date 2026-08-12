@@ -12,6 +12,7 @@
   "layout": {
     "loading": "옷장을 불러오는 중..."
   },
+  "aiTasks": { "dismiss": "AI 작업 상태 닫기", "failed": "AI 작업을 확인하세요", "finished": "AI 작업 완료", "working": "AI 작업 중" },
   "nextScheduled": {
     "comingUp": "예정",
     "dayAtTime": "{day} {time}",

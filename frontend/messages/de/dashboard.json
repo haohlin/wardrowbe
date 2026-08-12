@@ -12,6 +12,7 @@
   "layout": {
     "loading": "Dein Kleiderschrank wird geladen..."
   },
+  "aiTasks": { "dismiss": "KI-Aufgabenstatus schließen", "failed": "KI-Aufgabe erfordert Aufmerksamkeit", "finished": "KI-Aufgabe abgeschlossen", "working": "KI arbeitet" },
   "nextScheduled": {
     "comingUp": "Demnächst",
     "dayAtTime": "{day} um {time}",

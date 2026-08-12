@@ -15,6 +15,7 @@ import { mergeAiAssist } from '@/lib/studio/ai-assist-merge';
 import type { StudioItem } from '@/lib/studio/editor-state';
 import type { Outfit, OutfitItem } from '@/lib/hooks/use-outfits';
 import { useTranslations } from 'next-intl';
+import { useAiTasks } from '@/lib/ai-task-context';
 
 interface DetailsPanelProps {
   items: StudioItem[];
@@ -75,6 +76,7 @@ export function DetailsPanel({
   onAiMerge,
 }: DetailsPanelProps) {
   const t = useTranslations('outfits.details');
+  const { startTask } = useAiTasks();
   const [aiLoading, setAiLoading] = useState(false);
   const warnings = computeWarnings(items, t);
 
@@ -85,10 +87,13 @@ export function DetailsPanel({
     }
     setAiLoading(true);
     try {
-      const result = await api.post<Outfit>('/outfits/suggest', {
-        occasion,
-        include_items: items.map((i) => i.id),
-      });
+      const result = await startTask(
+        { type: 'studio-ai-assist', label: t('aiThinking') },
+        () => api.post<Outfit>('/outfits/suggest', {
+          occasion,
+          include_items: items.map((i) => i.id),
+        })
+      );
 
       const aiStudioItems = result.items.map(toStudioItem);
       const { merged, skipped } = mergeAiAssist(items, aiStudioItems);

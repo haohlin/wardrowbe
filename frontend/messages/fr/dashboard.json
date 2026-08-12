@@ -12,6 +12,7 @@
   "layout": {
     "loading": "Chargement de votre garde-robe..."
   },
+  "aiTasks": { "dismiss": "Masquer l’état de la tâche IA", "failed": "La tâche IA nécessite votre attention", "finished": "Tâche IA terminée", "working": "L’IA travaille" },
   "nextScheduled": {
     "comingUp": "À venir",
     "dayAtTime": "{day} à {time}",

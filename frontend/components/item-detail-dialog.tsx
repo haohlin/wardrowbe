@@ -66,6 +66,7 @@ import { ColorEyedropper } from '@/components/color-eyedropper';
 import { GeneratePairingsDialog } from '@/components/generate-pairings-dialog';
 import { useFeatures } from '@/lib/hooks/use-features';
 import { useTranslations } from 'next-intl';
+import { useAiTasks } from '@/lib/ai-task-context';
 
 interface ItemDetailDialogProps {
   item: Item | null;
@@ -79,6 +80,7 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
   const t = useTranslations('wardrobe.itemDetail');
   const tc = useTranslations('common');
   const tw = useTranslations('wardrobe');
+  const { startTask } = useAiTasks();
   const clothingTypes = useClothingTypes();
   const clothingColors = useClothingColors();
   const [isEditing, setIsEditing] = useState(false);
@@ -218,7 +220,10 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
 
   const handleRemoveBackground = async () => {
     try {
-      await removeBackground.mutateAsync({ id: item.id });
+      await startTask(
+        { type: 'background-removal', label: t('titles.removeBackground') },
+        () => removeBackground.mutateAsync({ id: item.id })
+      );
       setImageKey((k) => k + 1);
       toast.success(t('actions.backgroundRemoved'));
     } catch (error) {
