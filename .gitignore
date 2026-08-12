@@ -62,3 +62,6 @@ screenshots/
 testing/
 .playwright-mcp
 *.review.yml
+
+# Private Tailscale OIDC runtime (generated secrets, logs, state references)
+/deploy/tailscale-oidc/runtime/

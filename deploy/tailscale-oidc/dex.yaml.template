@@ -1,0 +1,42 @@
+issuer: https://@@TAILSCALE_DNS_NAME@@:8446/dex
+
+storage:
+  type: sqlite3
+  config:
+    file: /var/dex/dex.db
+
+web:
+  http: 0.0.0.0:5556
+
+oauth2:
+  skipApprovalScreen: true
+  alwaysShowLoginScreen: true
+
+staticClients:
+  - id: wardrowbe-web
+    name: Wardrowbe Web
+    secret: @@DEX_WEB_CLIENT_SECRET@@
+    redirectURIs:
+      - https://@@TAILSCALE_DNS_NAME@@:8445/api/auth/callback/oidc
+  - id: wardrowbe-mobile
+    name: Wardrowbe iOS
+    public: true
+    redirectURIs:
+      - https://@@TAILSCALE_DNS_NAME@@:8445/api/v1/auth/mobile-callback
+
+connectors:
+  - type: authproxy
+    id: tailscale
+    name: Tailscale
+    config:
+      userIDHeader: Tailscale-User-Login
+      userHeader: Tailscale-User-Login
+      userNameHeader: Tailscale-User-Name
+      emailHeader: Tailscale-User-Login
+
+enablePasswordDB: true
+staticPasswords:
+  - email: "@@OWNER_EMAIL@@"
+    hash: "@@OWNER_PASSWORD_HASH@@"
+    username: "@@OWNER_EMAIL@@"
+    userID: "@@OWNER_USER_ID@@"
