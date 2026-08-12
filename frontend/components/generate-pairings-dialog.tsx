@@ -20,6 +20,7 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useColorLabel, useTypeLabel } from '@/lib/hooks/use-translated-constants';
+import { useAiTasks } from '@/lib/ai-task-context';
 
 interface GeneratePairingsDialogProps {
   item: Item | null;
@@ -42,15 +43,16 @@ export function GeneratePairingsDialog({
   const router = useRouter();
   const t = useTranslations('pairings.generate');
   const tc = useTranslations('common');
+  const { startTask } = useAiTasks();
 
   const handleGenerate = async () => {
     if (!item) return;
 
     try {
-      const result = await generatePairings.mutateAsync({
-        itemId: item.id,
-        numPairings,
-      });
+      const result = await startTask(
+        { type: 'pairing-generation', label: t('generating') },
+        () => generatePairings.mutateAsync({ itemId: item.id, numPairings })
+      );
       setGeneratedPairings(result.pairings);
       toast.success(t('success', { count: result.generated }));
     } catch (error) {

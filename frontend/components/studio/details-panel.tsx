@@ -17,6 +17,7 @@ import type { Outfit, OutfitItem } from '@/lib/hooks/use-outfits';
 import { useTranslations } from 'next-intl';
 import { useTypeLabel } from '@/lib/hooks/use-translated-constants';
 import { useAiUiEnabled } from '@/lib/hooks/use-features';
+import { useAiTasks } from '@/lib/ai-task-context';
 
 interface DetailsPanelProps {
   items: StudioItem[];
@@ -49,6 +50,7 @@ export function DetailsPanel({
   const typeLabel = useTypeLabel();
   const itemLabel = (item: StudioItem) => item.name || typeLabel(item.type);
   const t = useTranslations('outfits.details');
+  const { startTask } = useAiTasks();
   const [aiLoading, setAiLoading] = useState(false);
   const aiUiEnabled = useAiUiEnabled();
   const warnings = computeWarnings(items, t);
@@ -60,10 +62,13 @@ export function DetailsPanel({
     }
     setAiLoading(true);
     try {
-      const result = await api.post<Outfit>('/outfits/suggest', {
-        occasion,
-        include_items: items.map((i) => i.id),
-      });
+      const result = await startTask(
+        { type: 'studio-ai-assist', label: t('aiThinking') },
+        () => api.post<Outfit>('/outfits/suggest', {
+          occasion,
+          include_items: items.map((i) => i.id),
+        })
+      );
 
       const aiStudioItems = result.items.map(toStudioItem);
       const { merged, skipped } = mergeAiAssist(items, aiStudioItems);

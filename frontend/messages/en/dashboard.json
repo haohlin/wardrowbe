@@ -12,6 +12,7 @@
   "layout": {
     "loading": "Loading your wardrobe..."
   },
+  "aiTasks": { "dismiss": "Dismiss AI task status", "failed": "AI task needs attention", "finished": "AI task finished", "working": "AI is working" },
   "nextScheduled": {
     "comingUp": "Coming up",
     "dayAtTime": "{day} at {time}",

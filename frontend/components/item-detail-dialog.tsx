@@ -96,6 +96,7 @@ import {
 import { useAiUiEnabled, useFeatures } from '@/lib/hooks/use-features';
 import { useLocale, useTranslations } from 'next-intl';
 import { formatDate } from '@/lib/utils';
+import { useAiTasks } from '@/lib/ai-task-context';
 
 interface ItemDetailDialogProps {
   item: Item | null;
@@ -149,6 +150,7 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
   const tw = useTranslations('wardrobe');
   const locale = useLocale();
   const router = useRouter();
+  const { startTask } = useAiTasks();
   const clothingTypes = useClothingTypes();
   const clothingColors = useClothingColors();
   const subtypeLabel = useSubtypeLabel();
@@ -332,7 +334,10 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
 
   const handleRemoveBackground = async () => {
     try {
-      await removeBackground.mutateAsync({ id: item.id });
+      await startTask(
+        { type: 'background-removal', label: t('titles.removeBackground') },
+        () => removeBackground.mutateAsync({ id: item.id })
+      );
       setImageKey((k) => k + 1);
       toast.success(t('actions.backgroundRemoved'));
     } catch (error) {

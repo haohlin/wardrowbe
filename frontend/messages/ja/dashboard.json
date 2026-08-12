@@ -12,6 +12,7 @@
   "layout": {
     "loading": "ワードローブを読み込み中..."
   },
+  "aiTasks": { "dismiss": "AIタスクの状態を閉じる", "failed": "AIタスクを確認してください", "finished": "AIタスクが完了しました", "working": "AIが処理中です" },
   "nextScheduled": {
     "comingUp": "今後の予定",
     "dayAtTime": "{day} {time}",

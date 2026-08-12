@@ -59,6 +59,7 @@ import { useWeather } from '@/lib/hooks/use-weather';
 import { usePreferences } from '@/lib/hooks/use-preferences';
 import { cn, formatShortDate } from '@/lib/utils';
 import { TempUnit, formatTemp, displayValue, toF, toCelsius } from '@/lib/temperature';
+import { useAiTasks } from '@/lib/ai-task-context';
 
 type Translator = (key: string, values?: Record<string, string | number>) => string;
 
@@ -591,6 +592,7 @@ function SuggestContent() {
   const { data: session } = useSession();
   const { data: weather, isLoading: weatherLoading } = useWeather();
   const { data: prefs } = usePreferences();
+  const { startTask } = useAiTasks();
   const temperatureUnit: TempUnit = prefs?.temperature_unit === 'fahrenheit' ? 'fahrenheit' : 'celsius';
   const [selectedOccasion, setSelectedOccasion] = useState<string | null>(null);
   const [occasionInitialized, setOccasionInitialized] = useState(false);
@@ -641,7 +643,10 @@ function SuggestContent() {
         };
       }
 
-      const result = await api.post<Outfit[]>('/outfits/suggest-options', request);
+      const result = await startTask(
+        { type: 'outfit-suggestion', label: t('generating') },
+        () => api.post<Outfit[]>('/outfits/suggest-options', request)
+      );
       setOutfits(result);
       setActiveOptionIndex(0);
     } catch (err) {

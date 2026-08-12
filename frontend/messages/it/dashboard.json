@@ -12,6 +12,7 @@
   "layout": {
     "loading": "Caricamento del guardaroba..."
   },
+  "aiTasks": { "dismiss": "Chiudi stato attività IA", "failed": "L’attività IA richiede attenzione", "finished": "Attività IA completata", "working": "L’IA sta lavorando" },
   "nextScheduled": {
     "comingUp": "In arrivo",
     "dayAtTime": "{day} alle {time}",

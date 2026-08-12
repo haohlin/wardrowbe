@@ -12,6 +12,7 @@
   "layout": {
     "loading": "正在加载您的衣橱..."
   },
+  "aiTasks": { "dismiss": "关闭 AI 任务状态", "failed": "AI 任务需要处理", "finished": "AI 任务已完成", "working": "AI 正在处理" },
   "nextScheduled": {
     "comingUp": "即将到来",
     "dayAtTime": "{day} {time}",
