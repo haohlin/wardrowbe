@@ -277,6 +277,65 @@ class TestSuggestEndpointRuntime:
         assert data["is_starter_suggestion"] is True
 
 
+class TestSavedOutfitReuse:
+    @pytest.mark.asyncio
+    async def test_auto_suggest_reuses_suitable_saved_outfit_before_ai(self):
+        from app.services.weather_service import WeatherData
+
+        service = RecommendationService(AsyncMock())
+        saved = Outfit(id=uuid4(), user_id=uuid4(), occasion="casual")
+        service._rank_reusable_outfits = AsyncMock(return_value=[saved])
+        service.generate_recommendation = AsyncMock()
+        weather = WeatherData(
+            temperature=20,
+            feels_like=20,
+            humidity=50,
+            precipitation_chance=0,
+            precipitation_mm=0,
+            wind_speed=0,
+            condition="clear",
+            condition_code=0,
+            is_day=True,
+            uv_index=0,
+            timestamp=datetime.now(UTC),
+        )
+
+        result = await service.auto_suggest_outfits(_make_user(), "casual", weather_override=weather)
+
+        assert result == {"mode": "existing", "outfits": [saved], "generated": False}
+        service.generate_recommendation.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_auto_suggest_can_force_fresh_generation(self):
+        from app.services.weather_service import WeatherData
+
+        service = RecommendationService(AsyncMock())
+        generated = Outfit(id=uuid4(), user_id=uuid4(), occasion="casual")
+        service._rank_reusable_outfits = AsyncMock(return_value=[])
+        service.generate_recommendation = AsyncMock(return_value=generated)
+        weather = WeatherData(
+            temperature=20,
+            feels_like=20,
+            humidity=50,
+            precipitation_chance=0,
+            precipitation_mm=0,
+            wind_speed=0,
+            condition="clear",
+            condition_code=0,
+            is_day=True,
+            uv_index=0,
+            timestamp=datetime.now(UTC),
+        )
+
+        result = await service.auto_suggest_outfits(
+            _make_user(), "casual", weather_override=weather, force_generate=True
+        )
+
+        assert result["mode"] == "generated"
+        service._rank_reusable_outfits.assert_not_awaited()
+        service.generate_recommendation.assert_awaited_once()
+
+
 def _make_item(**kwargs) -> ClothingItem:
     defaults = {
         "id": uuid4(),

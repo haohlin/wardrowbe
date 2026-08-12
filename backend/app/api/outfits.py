@@ -118,6 +118,9 @@ class SuggestRequest(BaseModel):
     weather_override: WeatherOverrideRequest | None = None
     exclude_items: list[UUID] = Field(default_factory=list, description="Items to exclude")
     include_items: list[UUID] = Field(default_factory=list, description="Items to include")
+    force_generate: bool = Field(
+        False, description="Skip reusable saved outfits and generate a fresh suggestion"
+    )
 
 
 class OutfitItemResponse(BaseModel):
@@ -208,6 +211,12 @@ class OutfitResponse(BaseModel):
     family_rating_count: int | None = None
     is_starter_suggestion: bool = False
     created_at: datetime
+
+
+class AutoSuggestResponse(BaseModel):
+    mode: Literal["existing", "generated"]
+    outfits: list[OutfitResponse]
+    generated: bool
 
 
 class OutfitListResponse(BaseModel):
@@ -502,6 +511,75 @@ async def suggest_outfit(
 
     wore_instead_map = await fetch_wore_instead_items_map(db, [outfit], user_id=current_user.id)
     return outfit_to_response(outfit, wore_instead_map, is_starter_suggestion=is_starter)
+
+
+@router.post("/suggest/auto", response_model=AutoSuggestResponse)
+async def auto_suggest_outfits(
+    request: SuggestRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> AutoSuggestResponse:
+    await rate_limit_by_user(str(current_user.id), "suggest_auto", max_requests=10, window_seconds=60)
+    weather_override = None
+    if request.weather_override:
+        w = request.weather_override
+        weather_override = WeatherData(
+            temperature=w.temperature,
+            feels_like=w.feels_like or w.temperature,
+            humidity=w.humidity,
+            precipitation_chance=w.precipitation_chance,
+            precipitation_mm=0,
+            wind_speed=0,
+            condition=w.condition,
+            condition_code=0,
+            is_day=True,
+            uv_index=0,
+            timestamp=datetime.utcnow(),
+        )
+
+    occasion = request.occasion
+    if occasion is None:
+        occasion = (
+            current_user.preferences.default_occasion
+            if current_user.preferences and current_user.preferences.default_occasion
+            else "casual"
+        )
+
+    service = RecommendationService(db)
+    try:
+        result = await service.auto_suggest_outfits(
+            user=current_user,
+            occasion=occasion,
+            weather_override=weather_override,
+            time_of_day=request.time_of_day,
+            user_request=request.preference_note,
+            force_generate=request.force_generate,
+        )
+    except InsufficientWardrobeError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from None
+    except AIDisabledError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Internal AI is disabled; outfit suggestions are deferred to an external agent.",
+        ) from None
+    except AIRecommendationError as error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from None
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from None
+
+    outfits = result["outfits"]
+    wore_instead_map = await fetch_wore_instead_items_map(db, outfits, user_id=current_user.id)
+    item_service = ItemService(db)
+    total_items = await item_service.get_ready_item_count(current_user.id)
+    is_starter = total_items <= 5 and result["mode"] == "generated"
+    return AutoSuggestResponse(
+        mode=result["mode"],
+        outfits=[
+            outfit_to_response(outfit, wore_instead_map, is_starter_suggestion=is_starter)
+            for outfit in outfits
+        ],
+        generated=result["generated"],
+    )
 
 
 class SuggestionCreateRequest(OutfitAttributeFields):

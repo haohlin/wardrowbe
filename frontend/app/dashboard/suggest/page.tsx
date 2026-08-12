@@ -44,7 +44,7 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
 import { api, ApiError, setAccessToken } from '@/lib/api';
-import { Outfit, SuggestRequest } from '@/lib/types';
+import { AutoSuggestResponse, Outfit, SuggestRequest } from '@/lib/types';
 import { useOccasions } from '@/lib/hooks/use-translated-constants';
 import { useWeather, Weather } from '@/lib/hooks/use-weather';
 import { usePreferences } from '@/lib/hooks/use-preferences';
@@ -499,7 +499,7 @@ export default function SuggestPage() {
     }
   }, [prefs, occasionInitialized, selectedOccasion]);
 
-  const handleGenerate = async (noteOverride?: string) => {
+  const handleGenerate = async (noteOverride?: string, forceGenerate = false) => {
     if (!selectedOccasion) return;
 
     if (session?.accessToken) {
@@ -515,6 +515,7 @@ export default function SuggestPage() {
       };
       const note = (noteOverride ?? preferenceNote).trim();
       if (note) request.preference_note = note;
+      if (forceGenerate) request.force_generate = true;
 
       if (weatherOverride) {
         request.weather_override = {
@@ -528,9 +529,9 @@ export default function SuggestPage() {
 
       const result = await startTask(
         { type: 'outfit-suggestion', label: t('generating') },
-        () => api.post<Outfit>('/outfits/suggest', request)
+        () => api.post<AutoSuggestResponse>('/outfits/suggest/auto', request)
       );
-      setOutfit(result);
+      setOutfit(result.outfits[0] ?? null);
       setRefinementNote('');
     } catch (err) {
       if (err instanceof ApiError) {
@@ -562,7 +563,7 @@ export default function SuggestPage() {
 
   const handleTryAnother = () => {
     setOutfit(null);
-    void handleGenerate();
+    void handleGenerate(undefined, true);
   };
 
   const handleRefine = () => {

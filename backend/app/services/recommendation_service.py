@@ -6,7 +6,7 @@ from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -80,6 +80,113 @@ class RecommendationService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.weather_service = WeatherService()
+
+    async def _get_weather_for_context(
+        self, user: User, weather_override: WeatherData | None
+    ) -> WeatherData:
+        if weather_override:
+            return weather_override
+
+        lat = float(user.location_lat) if user.location_lat is not None else None
+        lon = float(user.location_lon) if user.location_lon is not None else None
+        if (lat is None and lon is None) and user.location_name:
+            try:
+                geocoded = await self.weather_service.geocode_location_name(user.location_name)
+            except GeocodingServiceError as error:
+                raise ValueError(
+                    "Could not resolve location. Please update your location in settings."
+                ) from error
+            if geocoded:
+                lat, lon, _ = geocoded
+
+        if lat is None or lon is None:
+            raise ValueError("User location not set. Please set location in settings.")
+        try:
+            return await self.weather_service.get_current_weather(lat, lon)
+        except WeatherServiceError as error:
+            raise ValueError(
+                "Could not fetch weather data. Please try again or provide weather manually."
+            ) from error
+
+    async def _rank_reusable_outfits(
+        self, user: User, occasion: str, weather: WeatherData, limit: int = 6
+    ) -> list[Outfit]:
+        result = await self.db.execute(
+            select(Outfit)
+            .where(
+                and_(
+                    Outfit.user_id == user.id,
+                    Outfit.status != OutfitStatus.rejected,
+                    or_(
+                        Outfit.status == OutfitStatus.accepted,
+                        Outfit.source.in_(
+                            [OutfitSource.manual, OutfitSource.pairing, OutfitSource.external]
+                        ),
+                    ),
+                )
+            )
+            .options(
+                selectinload(Outfit.items).selectinload(OutfitItem.item),
+                selectinload(Outfit.feedback),
+                selectinload(Outfit.family_ratings).selectinload(FamilyOutfitRating.user),
+            )
+            .order_by(Outfit.created_at.desc())
+            .limit(80)
+        )
+        outfits = list(result.scalars().unique().all())
+
+        def suitability(outfit: Outfit) -> float:
+            score = 0.0
+            if outfit.occasion == occasion:
+                score += 40
+            elif occasion in {"casual", "weekend"} and outfit.occasion in {
+                "casual", "weekend", "outdoor", "travel"
+            }:
+                score += 18
+            elif occasion in {"office", "work", "business-casual"} and outfit.occasion in {
+                "office", "work", "smart-casual", "business-casual"
+            }:
+                score += 18
+            if outfit.status == OutfitStatus.accepted:
+                score += 12
+            if outfit.source in {OutfitSource.manual, OutfitSource.external}:
+                score += 8
+            saved_weather = outfit.weather_data or {}
+            old_temperature = saved_weather.get("temperature")
+            if isinstance(old_temperature, (int, float)):
+                score += max(0.0, 20 - abs(float(old_temperature) - weather.temperature))
+            old_condition = str(saved_weather.get("condition", "")).lower()
+            if old_condition and old_condition in weather.condition.lower():
+                score += 8
+            score += min(len(outfit.items or []), 5)
+            return score
+
+        ranked = sorted(outfits, key=suitability, reverse=True)
+        return [outfit for outfit in ranked if suitability(outfit) >= 45][:limit]
+
+    async def auto_suggest_outfits(
+        self,
+        user: User,
+        occasion: str,
+        weather_override: WeatherData | None = None,
+        time_of_day: str | None = None,
+        user_request: str | None = None,
+        force_generate: bool = False,
+    ) -> dict:
+        weather = await self._get_weather_for_context(user, weather_override)
+        if not force_generate and not (user_request and user_request.strip()):
+            reusable = await self._rank_reusable_outfits(user, occasion, weather)
+            if reusable:
+                return {"mode": "existing", "outfits": reusable, "generated": False}
+
+        generated = await self.generate_recommendation(
+            user=user,
+            occasion=occasion,
+            weather_override=weather,
+            time_of_day=time_of_day,
+            user_request=user_request,
+        )
+        return {"mode": "generated", "outfits": [generated], "generated": True}
 
     async def get_candidate_items(
         self,
@@ -674,32 +781,7 @@ class RecommendationService:
             exclude_items = list(set(exclude_items) | rejected_ids)
             logger.info(f"Auto-excluding {len(rejected_ids)} rejected items for user {user.id}")
 
-        if weather_override:
-            weather = weather_override
-        else:
-            lat = float(user.location_lat) if user.location_lat is not None else None
-            lon = float(user.location_lon) if user.location_lon is not None else None
-
-            if (lat is None and lon is None) and user.location_name:
-                try:
-                    geocoded = await self.weather_service.geocode_location_name(user.location_name)
-                except GeocodingServiceError as e:
-                    logger.error(f"Geocoding failed for outfit generation: {e}")
-                    raise ValueError(
-                        "Could not resolve location. Please update your location in settings."
-                    ) from e
-                if geocoded:
-                    lat, lon, _ = geocoded
-
-            if lat is None or lon is None:
-                raise ValueError("User location not set. Please set location in settings.")
-            try:
-                weather = await self.weather_service.get_current_weather(lat, lon)
-            except WeatherServiceError as e:
-                logger.error(f"Weather service failed: {e}")
-                raise ValueError(
-                    "Could not fetch weather data. Please try again or provide weather manually."
-                ) from e
+        weather = await self._get_weather_for_context(user, weather_override)
 
         preferences = user.preferences
 

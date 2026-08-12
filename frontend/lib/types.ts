@@ -330,6 +330,7 @@ export interface Outfit {
 export interface SuggestRequest {
   occasion: string;
   preference_note?: string;
+  force_generate?: boolean;
   weather_override?: {
     temperature: number;
     feels_like?: number;
@@ -339,6 +340,12 @@ export interface SuggestRequest {
   };
   exclude_items?: string[];
   include_items?: string[];
+}
+
+export interface AutoSuggestResponse {
+  mode: 'existing' | 'generated';
+  outfits: Outfit[];
+  generated: boolean;
 }
 
 // Pairing types
