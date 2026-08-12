@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from app.models.item import ClothingItem, ItemStatus
 from app.models.outfit import Outfit, OutfitItem, OutfitSource, OutfitStatus
@@ -12,7 +13,6 @@ from app.services.recommendation_service import (
     RecommendationService,
     get_time_of_day,
 )
-from pydantic import ValidationError
 
 
 def _make_user(timezone: str = "UTC") -> User:
@@ -321,7 +321,9 @@ class TestSavedOutfitReuse:
             timestamp=datetime.now(UTC),
         )
 
-        result = await service.auto_suggest_outfits(_make_user(), "casual", weather_override=weather)
+        result = await service.auto_suggest_outfits(
+            _make_user(), "casual", weather_override=weather
+        )
 
         assert result == {"mode": "existing", "outfits": [saved], "generated": False}
         service.generate_recommendation.assert_not_awaited()
@@ -360,9 +362,7 @@ class TestSavedOutfitReuse:
         service = RecommendationService(None)
         first, second, third = uuid4(), uuid4(), uuid4()
 
-        assert service._combination_is_excluded(
-            [second, first], [[first, second], [first, third]]
-        )
+        assert service._combination_is_excluded([second, first], [[first, second], [first, third]])
         assert not service._combination_is_excluded([first, second, third], [[first, second]])
 
 

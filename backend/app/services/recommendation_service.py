@@ -145,11 +145,17 @@ class RecommendationService:
             if outfit.occasion == occasion:
                 score += 40
             elif occasion in {"casual", "weekend"} and outfit.occasion in {
-                "casual", "weekend", "outdoor", "travel"
+                "casual",
+                "weekend",
+                "outdoor",
+                "travel",
             }:
                 score += 18
             elif occasion in {"office", "work", "business-casual"} and outfit.occasion in {
-                "office", "work", "smart-casual", "business-casual"
+                "office",
+                "work",
+                "smart-casual",
+                "business-casual",
             }:
                 score += 18
             if outfit.status == OutfitStatus.accepted:
@@ -529,9 +535,7 @@ class RecommendationService:
             excluded_sets = []
             for combination in excluded_combinations:
                 numbers = sorted(
-                    uuid_to_number[item_id]
-                    for item_id in combination
-                    if item_id in uuid_to_number
+                    uuid_to_number[item_id] for item_id in combination if item_id in uuid_to_number
                 )
                 if numbers:
                     excluded_sets.append("[" + ", ".join(map(str, numbers)) + "]")

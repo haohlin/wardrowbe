@@ -532,7 +532,9 @@ async def auto_suggest_outfits(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> AutoSuggestResponse:
-    await rate_limit_by_user(str(current_user.id), "suggest_auto", max_requests=10, window_seconds=60)
+    await rate_limit_by_user(
+        str(current_user.id), "suggest_auto", max_requests=10, window_seconds=60
+    )
     weather_override = None
     if request.weather_override:
         w = request.weather_override
@@ -577,7 +579,9 @@ async def auto_suggest_outfits(
             detail="Internal AI is disabled; outfit suggestions are deferred to an external agent.",
         ) from None
     except AIRecommendationError as error:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from None
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
+        ) from None
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from None
 

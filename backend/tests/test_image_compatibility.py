@@ -46,4 +46,3 @@ async def test_stored_derivatives_apply_exif_orientation(tmp_path):
 
     with Image.open(service.get_image_path(paths["image_path"])) as stored:
         assert stored.size == (4, 8)
-
