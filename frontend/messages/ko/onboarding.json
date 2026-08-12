@@ -24,9 +24,11 @@
   "firstItem": {
     "addToWardrobe": "옷장에 추가",
     "chooseDifferentPhoto": "다른 사진 선택",
+    "chooseFromLibrary": "사진 보관함에서 선택",
     "description": "옷 사진을 찍거나 이미지를 업로드하세요",
     "formatHint": "PNG, JPG 또는 HEIC",
     "previewAlt": "미리보기",
+    "takePhoto": "사진 촬영",
     "title": "첫 아이템 추가",
     "typeLabel": "어떤 종류의 옷인가요?",
     "typePlaceholder": "종류 선택...",

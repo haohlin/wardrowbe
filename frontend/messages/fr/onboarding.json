@@ -24,9 +24,11 @@
   "firstItem": {
     "addToWardrobe": "Ajouter à la garde-robe",
     "chooseDifferentPhoto": "Choisir une autre photo",
+    "chooseFromLibrary": "Choisir dans la photothèque",
     "description": "Prenez une photo ou téléchargez une image d'un vêtement",
     "formatHint": "PNG, JPG ou HEIC",
     "previewAlt": "Aperçu",
+    "takePhoto": "Prendre une photo",
     "title": "Ajoutez votre premier article",
     "typeLabel": "Quel type de vêtement est-ce ?",
     "typePlaceholder": "Sélectionnez le type...",

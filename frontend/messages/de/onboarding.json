@@ -24,9 +24,11 @@
   "firstItem": {
     "addToWardrobe": "Zum Kleiderschrank hinzufügen",
     "chooseDifferentPhoto": "Anderes Foto wählen",
+    "chooseFromLibrary": "Aus Fotomediathek wählen",
     "description": "Mach ein Foto oder lade ein Bild eines Kleidungsstücks hoch",
     "formatHint": "PNG, JPG oder HEIC",
     "previewAlt": "Vorschau",
+    "takePhoto": "Foto aufnehmen",
     "title": "Füge dein erstes Stück hinzu",
     "typeLabel": "Um welche Art von Kleidung handelt es sich?",
     "typePlaceholder": "Typ auswählen...",

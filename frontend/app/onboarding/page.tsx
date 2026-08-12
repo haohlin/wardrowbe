@@ -11,6 +11,7 @@ import {
   MapPin,
   Palette,
   Camera,
+  Image as ImageIcon,
   ChevronRight,
   ChevronLeft,
   Check,
@@ -685,20 +686,31 @@ function UploadStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => void
               </Button>
             </div>
           ) : (
-            <label className="flex flex-col items-center justify-center w-full aspect-square border-2 border-dashed rounded-lg cursor-pointer hover:bg-muted/50 transition-colors">
-              <div className="flex flex-col items-center justify-center pt-5 pb-6">
+            <div className="space-y-3">
+              <div className="flex flex-col items-center justify-center w-full aspect-square border-2 border-dashed rounded-lg bg-muted/20">
                 <Camera className="w-12 h-12 text-muted-foreground mb-4" />
                 <p className="mb-2 text-sm font-medium">{t('firstItem.uploadPrompt')}</p>
                 <p className="text-xs text-muted-foreground">{t('firstItem.formatHint')}</p>
               </div>
-              <input
-                type="file"
-                className="hidden"
-                accept="image/*"
-                capture="environment"
-                onChange={handleFileChange}
-              />
-            </label>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="flex min-h-12 cursor-pointer items-center justify-center rounded-md border border-input bg-background px-4 py-3 text-sm font-medium hover:bg-accent">
+                  <ImageIcon className="mr-2 h-4 w-4" />
+                  {t('firstItem.chooseFromLibrary')}
+                  <input type="file" className="hidden" accept="image/*" onChange={handleFileChange} />
+                </label>
+                <label className="flex min-h-12 cursor-pointer items-center justify-center rounded-md border border-input bg-background px-4 py-3 text-sm font-medium hover:bg-accent">
+                  <Camera className="mr-2 h-4 w-4" />
+                  {t('firstItem.takePhoto')}
+                  <input
+                    type="file"
+                    className="hidden"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={handleFileChange}
+                  />
+                </label>
+              </div>
+            </div>
           )}
 
           {file && (

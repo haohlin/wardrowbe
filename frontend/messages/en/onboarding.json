@@ -24,9 +24,11 @@
   "firstItem": {
     "addToWardrobe": "Add to Wardrobe",
     "chooseDifferentPhoto": "Choose Different Photo",
+    "chooseFromLibrary": "Choose from Library",
     "description": "Take a photo or upload an image of a clothing item",
     "formatHint": "PNG, JPG, or HEIC",
     "previewAlt": "Preview",
+    "takePhoto": "Take Photo",
     "title": "Add Your First Item",
     "typeLabel": "What type of clothing is this?",
     "typePlaceholder": "Select type...",
