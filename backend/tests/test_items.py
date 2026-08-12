@@ -368,6 +368,43 @@ class TestItemService:
 
 class TestBulkCreateSkipAI:
     @pytest.mark.asyncio
+    async def test_bulk_metadata_is_applied_per_image(self, client: AsyncClient, auth_headers):
+        files = [("images", ("shirt.jpg", _make_test_image_bytes(), "image/jpeg"))]
+
+        response = await client.post(
+            "/api/v1/items/bulk",
+            files=files,
+            data={
+                "skip_ai": "true",
+                "metadata": '[{"type":"shirt","name":"Blue Oxford","brand":"Acme","primary_color":"blue","colors":["blue"],"notes":"Work shirt","favorite":true}]',
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 201
+        item = response.json()["results"][0]["item"]
+        assert item["type"] == "shirt"
+        assert item["name"] == "Blue Oxford"
+        assert item["brand"] == "Acme"
+        assert item["primary_color"] == "blue"
+        assert item["notes"] == "Work shirt"
+        assert item["favorite"] is True
+
+    @pytest.mark.asyncio
+    async def test_bulk_metadata_count_must_match_images(self, client: AsyncClient, auth_headers):
+        files = [("images", ("shirt.jpg", _make_test_image_bytes(), "image/jpeg"))]
+
+        response = await client.post(
+            "/api/v1/items/bulk",
+            files=files,
+            data={"skip_ai": "true", "metadata": "[]"},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 400
+        assert "metadata length" in response.json()["detail"]
+
+    @pytest.mark.asyncio
     async def test_skip_ai_marks_items_ready_without_queueing(
         self, client: AsyncClient, auth_headers
     ):

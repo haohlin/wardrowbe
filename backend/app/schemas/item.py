@@ -57,6 +57,17 @@ class ItemCreate(ItemBase):
     primary_color: str | None = None
 
 
+class ItemBulkMetadata(BaseModel):
+    type: str | None = Field(None, max_length=50)
+    subtype: str | None = Field(None, max_length=50)
+    name: str | None = Field(None, max_length=100)
+    brand: str | None = Field(None, max_length=100)
+    notes: str | None = None
+    colors: list[str] | None = None
+    primary_color: str | None = None
+    favorite: bool = False
+
+
 class ItemUpdate(BaseModel):
     type: str | None = Field(None, min_length=1, max_length=50)
     subtype: str | None = Field(None, max_length=50)

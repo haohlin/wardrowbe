@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from datetime import UTC, datetime
 from typing import Annotated, Any
@@ -24,6 +25,7 @@ from app.schemas.item import (
     BulkUploadResponse,
     BulkUploadResult,
     ItemCreate,
+    ItemBulkMetadata,
     ItemFilter,
     ItemImageResponse,
     ItemListResponse,
@@ -221,6 +223,7 @@ async def bulk_create_items(
     current_user: Annotated[User, Depends(get_current_user)],
     images: list[UploadFile] = File(..., description="Multiple image files to upload"),
     skip_ai: bool = Form(False),
+    metadata: str | None = Form(None),
 ) -> BulkUploadResponse:
     if len(images) > settings.max_bulk_upload_count:
         raise HTTPException(
@@ -233,6 +236,25 @@ async def bulk_create_items(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="At least one image is required",
         )
+
+    metadata_items: list[ItemBulkMetadata]
+    if metadata is None:
+        metadata_items = [ItemBulkMetadata() for _ in images]
+    else:
+        try:
+            raw_metadata = json.loads(metadata)
+            if not isinstance(raw_metadata, list):
+                raise ValueError("metadata must be a JSON array")
+            if len(raw_metadata) != len(images):
+                raise ValueError("metadata length must match number of images")
+            metadata_items = [
+                ItemBulkMetadata.model_validate(entry or {}) for entry in raw_metadata
+            ]
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid bulk metadata: {exc}",
+            ) from None
 
     image_service = ImageService()
     item_service = ItemService(db)
@@ -250,8 +272,9 @@ async def bulk_create_items(
             logger.error(f"Failed to connect to Redis for bulk upload: {e}")
 
     try:
-        for upload_file in images:
+        for index, upload_file in enumerate(images):
             filename = upload_file.filename or "unknown.jpg"
+            item_metadata = metadata_items[index]
 
             try:
                 # Read and validate image
@@ -296,8 +319,16 @@ async def bulk_create_items(
                     original_filename=filename,
                 )
 
-                # Create item with unknown type (AI will detect)
-                item_data = ItemCreate(type="unknown")
+                item_data = ItemCreate(
+                    type=item_metadata.type or "unknown",
+                    subtype=item_metadata.subtype,
+                    name=item_metadata.name,
+                    brand=item_metadata.brand,
+                    notes=item_metadata.notes,
+                    colors=item_metadata.colors,
+                    primary_color=item_metadata.primary_color,
+                    favorite=item_metadata.favorite,
+                )
                 item = await item_service.create(
                     user_id=current_user.id,
                     item_data=item_data,

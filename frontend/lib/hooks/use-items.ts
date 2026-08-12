@@ -614,6 +614,17 @@ export interface BulkUploadResponse {
   results: BulkUploadResult[];
 }
 
+export interface BulkUploadMetadata {
+  type?: string;
+  subtype?: string;
+  name?: string;
+  brand?: string;
+  notes?: string;
+  colors?: string[];
+  primary_color?: string;
+  favorite?: boolean;
+}
+
 export interface BulkDeleteResponse {
   deleted: number;
   failed: number;
@@ -771,6 +782,7 @@ export function useBulkReanalyzeItems() {
 
 function uploadBulkItemsChunk(
   files: File[],
+  metadata: BulkUploadMetadata[],
   skipAi: boolean,
   token: string | null | undefined,
   onProgress: (percent: number) => void
@@ -780,6 +792,7 @@ function uploadBulkItemsChunk(
     formData.append('images', file);
   });
   formData.append('skip_ai', String(skipAi));
+  formData.append('metadata', JSON.stringify(metadata));
 
   return new Promise<BulkUploadResponse>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -880,15 +893,28 @@ export function useBulkCreateItems() {
   const [uploadProgress, setUploadProgress] = useState(0);
 
   const mutation = useMutation({
-    mutationFn: async ({ files, skipAi = false }: { files: File[]; skipAi?: boolean }) => {
+    mutationFn: async ({
+      files,
+      metadata = files.map(() => ({})),
+      skipAi = false,
+    }: {
+      files: File[];
+      metadata?: BulkUploadMetadata[];
+      skipAi?: boolean;
+    }) => {
+      if (metadata.length !== files.length) {
+        throw new Error('Bulk metadata must align with uploaded files');
+      }
       const token = session?.accessToken || getAccessToken();
       const chunks = chunkArray(files, BULK_UPLOAD_CHUNK_SIZE);
+      const metadataChunks = chunkArray(metadata, BULK_UPLOAD_CHUNK_SIZE);
       const responses: BulkUploadResponse[] = [];
 
       for (let i = 0; i < chunks.length; i++) {
         const chunkFiles = chunks[i];
+        const chunkMetadata = metadataChunks[i];
         try {
-          const response = await uploadBulkItemsChunk(chunkFiles, skipAi, token, (chunkPercent) => {
+          const response = await uploadBulkItemsChunk(chunkFiles, chunkMetadata, skipAi, token, (chunkPercent) => {
             const overall = ((i + chunkPercent / 100) / chunks.length) * 100;
             setUploadProgress(Math.round(overall));
           });
