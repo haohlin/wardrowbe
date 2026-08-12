@@ -1,0 +1,92 @@
+{
+  "documentType": "codex-security.hardening-analysis",
+  "schemaVersion": "1.0",
+  "analysisId": "wardrowbe_outbound_hardening_20260812",
+  "sourceEvidence": {
+    "kind": "source_review",
+    "label": "Wardrowbe auth, deployment, and outbound HTTP source review",
+    "collectionSha256": "767cfb53cb525a9ec3bb0e9fdf412ab3e0b16c5ba3a9d7343ac9aab4a1937200",
+    "artifactCount": 7,
+    "targetRevision": "e79cee7bd2af95afd385a1c85c32e050fdfbf8e0",
+    "sourceDrift": "none"
+  },
+  "assessment": {
+    "outcome": "opportunities_identified",
+    "summary": "One shared outbound-authority boundary can address global TLS weakening, destination SSRF risk, and credential forwarding drift."
+  },
+  "constraints": {
+    "profile": "lightweight-first",
+    "changeHorizons": ["incremental", "public_launch"],
+    "nonNegotiables": ["Keep official OIDC flow", "Run on a weak Linux server", "Keep Tailscale for family phase"],
+    "assumptions": ["No measured latency or memory budget was supplied."]
+  },
+  "opportunities": [
+    {
+      "opportunityId": "own-outbound-trust",
+      "title": "Own outbound destination, TLS, and credential policy",
+      "summary": "Route security-sensitive HTTP calls through one policy that validates every destination and binds credentials to administrative trust.",
+      "diagnosis": "TLS and destination controls are owned by deployment flags and individual callers, while user-controlled URLs can reach server network authority.",
+      "evidence": [
+        {"claimType": "observed", "sourceKind": "source", "evidenceId": "E-TLS", "path": "docker-compose.prod.yml", "claim": "Frontend sets NODE_TLS_REJECT_UNAUTHORIZED=0 for all Node HTTPS requests."},
+        {"claimType": "observed", "sourceKind": "source", "evidenceId": "E-AI-OUTBOUND", "path": "backend/app/services/ai_service.py", "claim": "User-configured AI URLs are called with redirects enabled and the server-wide AI API key."},
+        {"claimType": "observed", "sourceKind": "source", "evidenceId": "E-NOTIFY-OUTBOUND", "path": "backend/app/services/notification_providers.py", "claim": "User-configured notification destinations reach redirect-following HTTP clients without address-class policy."},
+        {"claimType": "inferred", "sourceKind": "source", "evidenceId": "E-AUTH", "path": "backend/app/utils/oidc.py", "claim": "Existing provider-specific CA support can replace global TLS weakening without redesigning OIDC."}
+      ],
+      "desiredInvariants": [
+        "Every security-sensitive HTTPS connection verifies a trusted certificate chain.",
+        "Every outbound destination and redirect hop is resolved and checked against an explicit policy before connection.",
+        "A server credential is sent only to an administrator-owned destination explicitly bound to that credential."
+      ],
+      "proposalPath": "proposals/own-outbound-trust.md",
+      "options": [
+        {
+          "optionId": "owned-in-process-boundary",
+          "title": "Owned in-process outbound boundary",
+          "kind": "incremental",
+          "summary": "Centralize validation and client construction in backend/frontend helpers, using scoped CA trust and per-destination credentials.",
+          "diagramPaths": {"before": "diagrams/own-outbound-trust-before.mmd", "after": "diagrams/own-outbound-trust-owned-in-process-boundary-after.mmd"},
+          "evidenceCoverage": [
+            {"evidenceId": "E-TLS", "effect": "addresses", "tacticalFixRequired": true, "rationale": "Remove global TLS disable and configure provider CA trust."},
+            {"evidenceId": "E-AI-OUTBOUND", "effect": "addresses", "tacticalFixRequired": true, "rationale": "Validate destinations and stop sending ambient API keys."},
+            {"evidenceId": "E-NOTIFY-OUTBOUND", "effect": "mitigates", "tacticalFixRequired": true, "rationale": "Shared checks cover known channels; each provider still needs integration tests."}
+          ],
+          "tradeoffs": [
+            {"dimension": "security", "direction": "improves", "confidence": "high", "basis": "source-derived", "assessment": "Known callers gain fail-closed destination and credential checks, though future callers can bypass the helper.", "validationPlan": "Run private-address, DNS rebinding, redirect, CA, and credential-leak tests across every caller."},
+            {"dimension": "performance", "direction": "regresses", "confidence": "medium", "basis": "source-derived", "assessment": "DNS resolution and redirect validation add bounded work before outbound calls.", "validationPlan": "Measure p50/p95 request setup time for AI and notification calls."},
+            {"dimension": "memory", "direction": "neutral", "confidence": "medium", "basis": "source-derived", "assessment": "Policy state and resolved-address sets remain small.", "validationPlan": "Compare backend RSS during concurrent outbound requests."},
+            {"dimension": "reliability", "direction": "improves", "confidence": "medium", "basis": "source-derived", "assessment": "Bad destinations fail before connection, but DNS edge cases can reject previously working private endpoints.", "validationPlan": "Test approved private endpoints on IPv4, IPv6, and Tailscale."},
+            {"dimension": "operability", "direction": "neutral", "confidence": "medium", "basis": "source-derived", "assessment": "No new service; allowlist and rejection logs need ownership.", "validationPlan": "Exercise configuration, observability, and incident runbooks."},
+            {"dimension": "migration", "direction": "improves", "confidence": "high", "basis": "source-derived", "assessment": "Existing API shapes can remain while unsafe destinations become validation errors.", "validationPlan": "Run compatibility tests for approved OIDC, AI, ntfy, and Mattermost endpoints."}
+          ],
+          "residualRisks": ["Callers outside the owned helper can reintroduce ambient authority.", "Application-level validation cannot contain a compromised process."],
+          "implementationReadiness": {"affectedComponents": ["frontend/lib/auth.ts", "backend/app/utils/oidc.py", "backend/app/services/ai_service.py", "backend/app/services/notification_providers.py"], "workPackages": ["Scoped CA trust", "Destination policy", "Credential binding", "Regression tests"], "acceptanceCriteria": ["Untrusted TLS and forbidden address classes fail closed", "Global keys never reach user-owned destinations"], "migrationNotes": ["Allowlist intended local AI endpoints explicitly"], "rollback": "Revert shared client use while retaining global TLS verification."}
+        },
+        {
+          "optionId": "egress-gateway",
+          "title": "Dedicated outbound egress gateway",
+          "kind": "isolation",
+          "summary": "Move destination enforcement and credentials to a constrained proxy; application workloads receive no direct sensitive egress authority.",
+          "diagramPaths": {"before": "diagrams/own-outbound-trust-before.mmd", "after": "diagrams/own-outbound-trust-egress-gateway-after.mmd"},
+          "evidenceCoverage": [
+            {"evidenceId": "E-TLS", "effect": "addresses", "tacticalFixRequired": true, "rationale": "Frontend OIDC still needs correct CA trust; gateway protects backend egress."},
+            {"evidenceId": "E-AI-OUTBOUND", "effect": "addresses", "tacticalFixRequired": true, "rationale": "Gateway owns allowed AI destinations and credentials."},
+            {"evidenceId": "E-NOTIFY-OUTBOUND", "effect": "addresses", "tacticalFixRequired": true, "rationale": "Network boundary blocks direct notification egress."}
+          ],
+          "tradeoffs": [
+            {"dimension": "security", "direction": "improves", "confidence": "high", "basis": "analogous", "assessment": "Network isolation reduces bypass and credential blast radius, but the gateway becomes privileged.", "validationPlan": "Prove backend direct egress fails and gateway policy rejects forbidden targets and redirects."},
+            {"dimension": "performance", "direction": "regresses", "confidence": "medium", "basis": "hypothetical", "assessment": "One network hop and possible request buffering are added.", "validationPlan": "Compare AI streaming and notification latency through the gateway."},
+            {"dimension": "memory", "direction": "regresses", "confidence": "high", "basis": "source-derived", "assessment": "An additional process and connection pools consume memory.", "validationPlan": "Measure idle and peak gateway RSS on target weak server."},
+            {"dimension": "reliability", "direction": "regresses", "confidence": "medium", "basis": "analogous", "assessment": "Gateway failure can stop all outbound features, though it also contains failures.", "validationPlan": "Run restart, timeout, saturation, and rollback drills."},
+            {"dimension": "operability", "direction": "regresses", "confidence": "high", "basis": "source-derived", "assessment": "New deployment, policy, logs, health checks, and upgrades are required.", "validationPlan": "Operate a staging gateway through one upgrade and incident exercise."},
+            {"dimension": "migration", "direction": "regresses", "confidence": "medium", "basis": "source-derived", "assessment": "All outbound callers and network policies must move together or through a staged compatibility mode.", "validationPlan": "Canary one channel, then AI calls, with direct-egress monitoring before enforcement."}
+          ],
+          "residualRisks": ["Frontend OIDC TLS remains outside backend gateway.", "Gateway policy or credential compromise remains high impact."],
+          "implementationReadiness": {"affectedComponents": ["backend outbound clients", "container networking", "Kubernetes NetworkPolicy"], "workPackages": ["Gateway policy", "Network isolation", "Caller migration", "Observability"], "acceptanceCriteria": ["Backend cannot connect directly to forbidden networks", "Only gateway owns outbound credentials"], "migrationNotes": ["Canary by channel before default-deny egress"], "rollback": "Restore direct egress and remove gateway routing while preserving application validation."}
+        }
+      ],
+      "recommendedOptionId": "owned-in-process-boundary",
+      "recommendation": "Use the in-process boundary for the private family phase; move to a gateway if public multi-user risk or compliance requirements outweigh weak-server constraints."
+    }
+  ],
+  "openQuestions": ["Which private AI hosts must family deployment allow?", "Will public users configure their own outbound destinations?"]
+}

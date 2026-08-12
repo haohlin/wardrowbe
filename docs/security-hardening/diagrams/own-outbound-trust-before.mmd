@@ -1,0 +1,7 @@
+flowchart LR
+  U[Authenticated user] --> C[User-owned endpoint configuration]
+  C --> B[Backend and worker HTTP clients]
+  B --> N[Internal and external network]
+  K[Server-wide AI key] --> B
+  O[OIDC provider] --> F[Next.js auth]
+  T[Global TLS verification disabled] --> F
