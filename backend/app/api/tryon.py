@@ -81,6 +81,7 @@ async def list_tryons(
         tryons=records,
         results=records,
         data=records,
+        sessions=records,
         total=total,
         page=page,
         page_size=page_size,

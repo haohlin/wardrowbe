@@ -107,8 +107,10 @@ async def test_native_history_and_quota_shape(
     assert history.status_code == 200
     assert history.json()["items"][0]["id"] == created.json()["id"]
     assert history.json()["tryons"][0]["id"] == created.json()["id"]
+    assert history.json()["sessions"][0]["id"] == created.json()["id"]
     assert quota.status_code == 200
     assert quota.json()["remaining"] > 0
+    assert quota.json()["bonus_credits"] == 0
     assert quota.json()["unlimited"] is True
 
 

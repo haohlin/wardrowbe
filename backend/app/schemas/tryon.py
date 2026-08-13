@@ -52,6 +52,7 @@ class TryOnListResponse(BaseModel):
     tryons: list[TryOnResponse]
     results: list[TryOnResponse]
     data: list[TryOnResponse]
+    sessions: list[TryOnResponse]
     total: int
     page: int
     page_size: int
@@ -62,6 +63,7 @@ class TryOnQuotaResponse(BaseModel):
     used: int
     limit: int
     remaining: int
+    bonus_credits: int = 0
     unlimited: bool = True
     can_generate: bool = True
 
