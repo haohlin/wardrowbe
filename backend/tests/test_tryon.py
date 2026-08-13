@@ -10,12 +10,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.item import ClothingItem, ItemStatus
 from app.models.outfit import Outfit, OutfitItem, OutfitSource
 from app.models.tryon import TryOn, TryOnStatus
+from app.services.image_service import ImageService
 from app.workers.tryon import generate_tryon
 
 
 def _jpeg() -> bytes:
     output = BytesIO()
     Image.new("RGB", (48, 64), "white").save(output, format="JPEG")
+    return output.getvalue()
+
+
+def _marker_image(size: tuple[int, int], marker: tuple[int, int]) -> bytes:
+    image = Image.new("RGB", size, "white")
+    image.putpixel(marker, (0, 0, 0))
+    output = BytesIO()
+    image.save(output, format="JPEG", quality=100, subsampling=0)
     return output.getvalue()
 
 
@@ -132,6 +141,33 @@ async def test_native_upload_rejects_foreign_outfit(
 
 
 @pytest.mark.asyncio
+async def test_native_retry_uses_saved_tryon_photo(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    test_user,
+    auth_headers,
+    tmp_path,
+):
+    outfit = await _outfit(db_session, test_user.id)
+    storage = ImageService(str(tmp_path))
+    saved = await storage.process_and_store(test_user.id, _jpeg(), "saved-person.jpg")
+    test_user.tryon_person_image_path = saved["image_path"]
+    await db_session.commit()
+
+    redis = AsyncMock()
+    redis.enqueue_job.return_value.job_id = "tryon-job"
+    with patch("app.api.tryon.create_pool", new_callable=AsyncMock, return_value=redis):
+        response = await client.post(
+            "/api/v1/tryon/outfit",
+            headers=auth_headers,
+            data={"outfit_id": str(outfit.id), "use_saved_photo": "true"},
+        )
+
+    assert response.status_code == 202
+    assert response.json()["person_image_path"] == saved["image_path"]
+
+
+@pytest.mark.asyncio
 async def test_worker_generates_and_completes_tryon(
     db_session: AsyncSession,
     test_user,
@@ -140,7 +176,7 @@ async def test_worker_generates_and_completes_tryon(
     outfit = await _outfit(db_session, test_user.id)
     user_dir = tmp_path / str(test_user.id)
     user_dir.mkdir()
-    (user_dir / "person.jpg").write_bytes(_jpeg())
+    (user_dir / "person.jpg").write_bytes(_marker_image((96, 64), (72, 16)))
     (user_dir / "shirt.jpg").write_bytes(_jpeg())
     record = TryOn(
         user_id=test_user.id,
@@ -169,3 +205,47 @@ async def test_worker_generates_and_completes_tryon(
     assert record.status == TryOnStatus.completed
     assert record.result_image_path
     assert (tmp_path / record.result_image_path).is_file()
+    assert record.comparison_image_path
+    comparison = Image.open(tmp_path / record.comparison_image_path)
+    assert comparison.size == (48, 64)
+
+
+@pytest.mark.asyncio
+async def test_comparison_image_aligns_detected_face(
+    db_session: AsyncSession,
+    test_user,
+    tmp_path,
+    monkeypatch,
+):
+    outfit = await _outfit(db_session, test_user.id)
+    user_dir = tmp_path / str(test_user.id)
+    user_dir.mkdir()
+    (user_dir / "person.jpg").write_bytes(_marker_image((96, 64), (72, 16)))
+    (user_dir / "shirt.jpg").write_bytes(_jpeg())
+    record = TryOn(
+        user_id=test_user.id,
+        outfit_id=outfit.id,
+        person_image_path=f"{test_user.id}/person.jpg",
+    )
+    db_session.add(record)
+    await db_session.commit()
+
+    faces = iter([(0.75, 0.75), (0.5, 0.75)])
+    monkeypatch.setattr("app.workers.tryon.detect_face_center", lambda _: next(faces))
+    service = AsyncMock()
+    service.generate.return_value = (_marker_image((48, 64), (24, 16)), "test-model")
+    with (
+        patch("app.workers.tryon.get_db_session", return_value=db_session),
+        patch(
+            "app.workers.tryon.ImageService",
+            return_value=ImageService(str(tmp_path)),
+        ),
+        patch("app.workers.tryon.TryOnService", return_value=service),
+        patch.object(db_session, "close", new_callable=AsyncMock),
+    ):
+        await generate_tryon({}, str(record.id))
+
+    await db_session.refresh(record)
+    comparison = Image.open(tmp_path / record.comparison_image_path)
+    assert comparison.size == (48, 64)
+    assert sum(comparison.getpixel((24, 16))) < 100

@@ -2,11 +2,13 @@ import logging
 from datetime import UTC, datetime
 from uuid import UUID
 
+from PIL import Image
 from sqlalchemy import select
 
 from app.models.item import ClothingItem
 from app.models.outfit import OutfitItem
 from app.models.tryon import TryOn, TryOnStatus
+from app.services.face_alignment import detect_face_center
 from app.services.image_service import ImageService
 from app.services.tryon_service import TryOnService
 from app.workers.db import get_db_session
@@ -47,6 +49,19 @@ async def generate_tryon(ctx: dict, tryon_id: str) -> None:
 
         generated, model = await TryOnService().generate(person_path, garment_paths)
         paths = await storage.process_and_store(record.user_id, generated, f"tryon-{record.id}.png")
+        result_path = storage.get_image_path(paths["image_path"])
+        with Image.open(result_path) as result_image:
+            result_size = result_image.size
+        source_face_center = detect_face_center(person_path)
+        result_face_center = detect_face_center(result_path)
+        record.comparison_image_path = await storage.create_tryon_comparison_image(
+            record.user_id,
+            person_path.read_bytes(),
+            person_path.name,
+            result_size,
+            source_face_center,
+            result_face_center,
+        )
         record.result_image_path = paths["image_path"]
         record.model = model
         record.status = TryOnStatus.completed

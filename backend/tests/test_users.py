@@ -1,12 +1,20 @@
 from datetime import time
+from io import BytesIO
 from uuid import uuid4
 
 import pytest
 from httpx import AsyncClient
+from PIL import Image
 
 from app.models.item import ClothingItem, ItemStatus
 from app.models.outfit import Outfit
 from app.models.schedule import Schedule
+
+
+def _photo(size: tuple[int, int] = (120, 160)) -> bytes:
+    output = BytesIO()
+    Image.new("RGB", size, "white").save(output, format="JPEG")
+    return output.getvalue()
 
 
 class TestUserMe:
@@ -126,6 +134,30 @@ class TestUserUpdate:
         # Check coordinates are stored (may be string or float depending on serialization)
         assert float(data["location_lat"]) == pytest.approx(40.7128, rel=1e-4)
         assert float(data["location_lon"]) == pytest.approx(-74.0060, rel=1e-4)
+
+    @pytest.mark.asyncio
+    async def test_tryon_photo_upload_and_delete_updates_profile(
+        self, client: AsyncClient, test_user, auth_headers, tmp_path, monkeypatch
+    ):
+        from app.api import users
+        from app.services.image_service import ImageService
+
+        monkeypatch.setattr(users, "ImageService", lambda: ImageService(str(tmp_path)))
+
+        uploaded = await client.post(
+            "/api/v1/users/me/tryon-photo",
+            headers=auth_headers,
+            files={"photo": ("person.jpg", _photo(), "image/jpeg")},
+        )
+
+        assert uploaded.status_code == 200
+        assert uploaded.json()["tryon_person_image_url"].startswith("/api/v1/images/")
+
+        removed = await client.delete("/api/v1/users/me/tryon-photo", headers=auth_headers)
+        assert removed.status_code == 204
+
+        profile = await client.get("/api/v1/users/me", headers=auth_headers)
+        assert profile.json()["tryon_person_image_url"] is None
 
     @pytest.mark.asyncio
     async def test_gender_is_optional(self, client: AsyncClient, test_user, auth_headers):

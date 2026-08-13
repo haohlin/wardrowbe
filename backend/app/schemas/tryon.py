@@ -14,6 +14,7 @@ class TryOnResponse(BaseModel):
     outfit_id: UUID
     status: str
     person_image_path: str
+    comparison_image_path: str | None = None
     result_image_path: str | None = None
     model: str | None = None
     error: str | None = None
@@ -24,12 +25,17 @@ class TryOnResponse(BaseModel):
     @computed_field
     @property
     def person_image_url(self) -> str:
-        return sign_image_url(self.person_image_path)
+        return sign_image_url(self.comparison_image_path or self.person_image_path)
 
     @computed_field
     @property
     def source_image_url(self) -> str:
         return self.person_image_url
+
+    @computed_field
+    @property
+    def original_person_image_url(self) -> str:
+        return sign_image_url(self.person_image_path)
 
     @computed_field
     @property

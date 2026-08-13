@@ -33,6 +33,7 @@ class TryOn(Base):
         index=True,
     )
     person_image_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    comparison_image_path: Mapped[str | None] = mapped_column(String(500))
     result_image_path: Mapped[str | None] = mapped_column(String(500))
     model: Mapped[str | None] = mapped_column(String(255))
     job_id: Mapped[str | None] = mapped_column(String(255))

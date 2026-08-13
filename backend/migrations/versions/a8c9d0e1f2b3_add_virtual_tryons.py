@@ -29,6 +29,7 @@ def upgrade() -> None:
             outfit_id UUID NOT NULL REFERENCES outfits(id) ON DELETE CASCADE,
             status tryon_status NOT NULL DEFAULT 'pending',
             person_image_path VARCHAR(500) NOT NULL,
+            comparison_image_path VARCHAR(500),
             result_image_path VARCHAR(500),
             model VARCHAR(255),
             job_id VARCHAR(255),

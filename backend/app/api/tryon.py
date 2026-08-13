@@ -117,8 +117,9 @@ async def create_outfit_tryon(
     except (ValueError, TypeError):
         raise HTTPException(status_code=422, detail="outfit_id is required") from None
 
+    use_saved_photo = str(form.get("use_saved_photo", "")).lower() == "true"
     upload = next((value for _, value in form.multi_items() if isinstance(value, UploadFile)), None)
-    if upload is None:
+    if upload is None and not use_saved_photo:
         raise HTTPException(status_code=422, detail="A person photo is required")
 
     outfit = await db.scalar(
@@ -127,25 +128,31 @@ async def create_outfit_tryon(
     if outfit is None:
         raise HTTPException(status_code=404, detail="Outfit not found")
 
-    content = await upload.read()
     image_service = ImageService()
-    content_type = upload.content_type or "application/octet-stream"
-    if not image_service.validate_image(content, content_type, upload.filename):
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid image file. Supported formats: JPEG, PNG, WebP, HEIC",
-        )
-    try:
-        paths = await image_service.process_and_store(
-            current_user.id, content, upload.filename or "person.jpg"
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from None
+    if use_saved_photo and upload is None:
+        if not current_user.tryon_person_image_path:
+            raise HTTPException(status_code=422, detail="No saved try-on photo")
+        person_image_path = current_user.tryon_person_image_path
+    else:
+        content = await upload.read()
+        content_type = upload.content_type or "application/octet-stream"
+        if not image_service.validate_image(content, content_type, upload.filename):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid image file. Supported formats: JPEG, PNG, WebP, HEIC",
+            )
+        try:
+            paths = await image_service.process_and_store(
+                current_user.id, content, upload.filename or "person.jpg"
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        person_image_path = paths["image_path"]
 
     record = TryOn(
         user_id=current_user.id,
         outfit_id=outfit_id,
-        person_image_path=paths["image_path"],
+        person_image_path=person_image_path,
         status=TryOnStatus.pending,
     )
     db.add(record)
@@ -187,7 +194,9 @@ async def delete_tryon(
     if record is None:
         raise HTTPException(status_code=404, detail="Try-on not found")
     image_service = ImageService()
-    _delete_image_variants(image_service, record.person_image_path)
+    if record.person_image_path != current_user.tryon_person_image_path:
+        _delete_image_variants(image_service, record.person_image_path)
+    _delete_image_variants(image_service, record.comparison_image_path)
     _delete_image_variants(image_service, record.result_image_path)
     await db.delete(record)
     await db.commit()

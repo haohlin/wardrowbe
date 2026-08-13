@@ -159,6 +159,47 @@ class ImageService:
             "image_hash": image_hash,
         }
 
+    async def create_tryon_comparison_image(
+        self,
+        user_id: uuid.UUID,
+        image_data: bytes,
+        original_filename: str,
+        reference_size: tuple[int, int],
+        source_face_center: tuple[float, float] | None = None,
+        reference_face_center: tuple[float, float] | None = None,
+    ) -> str:
+        """Store an output-sized, center-cropped version for before/after comparison."""
+        ext = Path(original_filename).suffix.lower()
+        image = (
+            self._convert_heic(image_data)
+            if ext in {".heic", ".heif"}
+            else Image.open(BytesIO(image_data))
+        )
+        image = self._normalize_orientation(image).convert("RGB")
+        target_width, target_height = reference_size
+        scale = max(target_width / image.width, target_height / image.height)
+        resized = image.resize(
+            (round(image.width * scale), round(image.height * scale)), Image.Resampling.LANCZOS
+        )
+        left = (resized.width - target_width) / 2
+        top = (resized.height - target_height) / 2
+        if source_face_center and reference_face_center:
+            source_x = source_face_center[0] * resized.width
+            source_y = (1 - source_face_center[1]) * resized.height
+            reference_x = reference_face_center[0] * target_width
+            reference_y = (1 - reference_face_center[1]) * target_height
+            left = source_x - reference_x
+            top = source_y - reference_y
+        left = round(max(0, min(left, resized.width - target_width)))
+        top = round(max(0, min(top, resized.height - target_height)))
+        cropped = resized.crop((left, top, left + target_width, top + target_height))
+        filename = self._generate_filename(".jpg")
+        path = self._get_user_path(user_id) / filename
+        output = BytesIO()
+        cropped.save(output, format="JPEG", quality=92, optimize=True)
+        path.write_bytes(output.getvalue())
+        return f"{user_id}/{filename}"
+
     def get_image_path(self, relative_path: str) -> Path:
         """Get full path for an image."""
         return self.storage_path / relative_path

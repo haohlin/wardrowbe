@@ -1,19 +1,22 @@
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.datastructures import UploadFile
 
 from app.database import get_db
 from app.models.item import ClothingItem, ItemStatus
 from app.models.outfit import Outfit
 from app.models.schedule import Schedule
 from app.models.user import User
+from app.services.image_service import ImageService
 from app.services.user_service import UserService
 from app.utils.auth import get_current_user
 from app.utils.locale import SUPPORTED_LOCALES, is_supported_locale
+from app.utils.signed_urls import sign_image_url
 
 router = APIRouter(prefix="/users/me", tags=["Users"])
 
@@ -33,6 +36,7 @@ class UserProfileResponse(BaseModel):
     email: str
     display_name: str
     avatar_url: str | None = None
+    tryon_person_image_url: str | None = None
     timezone: str
     locale: str
     location_lat: float | None = None
@@ -127,12 +131,74 @@ async def update_profile(
     return _user_response(current_user)
 
 
+@router.post("/tryon-photo", response_model=UserProfileResponse)
+async def upload_tryon_photo(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> UserProfileResponse:
+    form = await request.form()
+    upload = form.get("photo")
+    if not isinstance(upload, UploadFile):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="A photo is required"
+        )
+
+    content = await upload.read()
+    storage = ImageService()
+    content_type = upload.content_type or "application/octet-stream"
+    if not storage.validate_image(content, content_type, upload.filename):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid try-on photo")
+
+    old_path = current_user.tryon_person_image_path
+    try:
+        paths = await storage.process_and_store(
+            current_user.id, content, upload.filename or "tryon-person.jpg"
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    current_user.tryon_person_image_path = paths["image_path"]
+    if old_path:
+        _delete_image_variants(storage, old_path)
+    await db.commit()
+    await db.refresh(current_user)
+    return _user_response(current_user)
+
+
+@router.delete("/tryon-photo", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_tryon_photo(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> None:
+    storage = ImageService()
+    _delete_image_variants(storage, current_user.tryon_person_image_path)
+    current_user.tryon_person_image_path = None
+    await db.commit()
+
+
+def _delete_image_variants(storage: ImageService, path: str | None) -> None:
+    if not path:
+        return
+    base = path.rsplit(".", 1)[0]
+    storage.delete_images(
+        {
+            "original": path,
+            "medium": f"{base}_medium.jpg",
+            "thumbnail": f"{base}_thumb.jpg",
+        }
+    )
+
+
 def _user_response(user: User) -> UserProfileResponse:
     return UserProfileResponse(
         id=str(user.id),
         email=user.email,
         display_name=user.display_name,
         avatar_url=user.avatar_url,
+        tryon_person_image_url=(
+            sign_image_url(user.tryon_person_image_path) if user.tryon_person_image_path else None
+        ),
         timezone=user.timezone,
         locale=user.locale,
         location_lat=float(user.location_lat) if user.location_lat else None,
