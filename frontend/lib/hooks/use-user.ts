@@ -11,6 +11,7 @@ export interface UserProfile {
   email: string;
   display_name: string;
   avatar_url?: string;
+  tryon_person_image_url?: string | null;
   timezone: string;
   locale: string;
   location_lat?: number;

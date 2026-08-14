@@ -14,6 +14,7 @@ import {
   Settings,
   Users,
   Bell,
+  Camera,
   HeartHandshake,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -28,6 +29,7 @@ export function Sidebar() {
     { name: t('wardrobe'), href: '/dashboard/wardrobe', icon: Shirt },
     { name: t('suggestOutfit'), href: '/dashboard/suggest', icon: Sparkles },
     { name: t('outfits'), href: '/dashboard/outfits', icon: LayoutGrid },
+    { name: t('tryOn'), href: '/dashboard/tryon', icon: Camera },
     { name: t('pairings'), href: '/dashboard/pairings', icon: Layers },
     { name: t('history'), href: '/dashboard/history', icon: History },
     { name: t('familyFeed'), href: '/dashboard/family/feed', icon: HeartHandshake },
