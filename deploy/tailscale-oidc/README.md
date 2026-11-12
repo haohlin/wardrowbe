@@ -51,7 +51,9 @@ In the official iOS app, enter exactly:
 https://<tailnet-host>:8445
 ```
 
-Do not append `/api/v1`; the app adds its API path.
+`<tailnet-host>` is this Mac's Tailscale DNS name. `setup.sh` reads it from
+`tailscale status` and stores it as `TAILSCALE_DNS_NAME` in
+`runtime/wardrowbe.env`. Do not append `/api/v1`; the app adds its API path.
 
 ## Login choices
 
