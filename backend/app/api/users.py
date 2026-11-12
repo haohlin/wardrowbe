@@ -2,8 +2,12 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, field_validator
+from sqlalchemy import func, select
 
 from app.database import DbSession
+from app.models.item import ClothingItem, ItemStatus
+from app.models.outfit import Outfit
+from app.models.schedule import Schedule
 from app.models.user import User
 from app.schemas.user import DisplayName, Latitude, Longitude, PlaceName
 from app.services.user_service import UserService
@@ -17,6 +21,12 @@ router = APIRouter(prefix="/users/me", tags=["Users"])
 
 class OnboardingCompleteResponse(BaseModel):
     onboarding_completed: bool
+
+
+class ActivationProgressResponse(BaseModel):
+    items_ready: int
+    total_outfits: int
+    active_schedules: int
 
 
 class UserProfileResponse(BaseModel):
@@ -66,6 +76,35 @@ async def get_profile(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> UserProfileResponse:
     return _user_response(current_user)
+
+
+@router.get("/activation", response_model=ActivationProgressResponse)
+async def get_activation_progress(
+    db: DbSession,
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> ActivationProgressResponse:
+    items_ready = await db.scalar(
+        select(func.count())
+        .select_from(ClothingItem)
+        .where(
+            ClothingItem.user_id == current_user.id,
+            ClothingItem.status == ItemStatus.ready,
+            ClothingItem.is_archived.is_(False),
+        )
+    )
+    total_outfits = await db.scalar(
+        select(func.count()).select_from(Outfit).where(Outfit.user_id == current_user.id)
+    )
+    active_schedules = await db.scalar(
+        select(func.count())
+        .select_from(Schedule)
+        .where(Schedule.user_id == current_user.id, Schedule.enabled.is_(True))
+    )
+    return ActivationProgressResponse(
+        items_ready=items_ready or 0,
+        total_outfits=total_outfits or 0,
+        active_schedules=active_schedules or 0,
+    )
 
 
 @router.patch("", response_model=UserProfileResponse)
