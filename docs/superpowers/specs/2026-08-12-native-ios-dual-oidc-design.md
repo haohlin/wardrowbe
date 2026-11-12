@@ -1,5 +1,14 @@
 # Native iOS dual OIDC authentication design
 
+> **Status, 2026-11-12:** Historical record. Upstream v1.13 superseded the
+> section "Stable Wardrowbe sessions across both Dex methods" and the token
+> parts of "Testing" and "Rollback". Upstream now binds API tokens to
+> `users.id` plus a sign-in identity row, and an account holds one OIDC identity
+> at a time, so sessions from the two Dex methods take turns instead of staying
+> valid together. The runtime manages four processes instead of three. Current
+> behaviour is in `docs/AUTH_AND_DEPLOYMENT.md` and
+> `deploy/tailscale-oidc/README.md`.
+
 ## Goal
 
 Let the official Wardrowbe iOS app connect to the Mac-hosted Wardrowbe API over

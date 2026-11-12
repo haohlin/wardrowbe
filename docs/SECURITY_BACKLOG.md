@@ -2,11 +2,13 @@
 
 Source review and a production-dependency audit were run against personal commit `e79cee7`. This file records gates and proposals; it does not claim remediation.
 
+Status notes dated 2026-11-12 record what upstream v1.13 changed. Items without a note were not audited again.
+
 ## Public-launch gates
 
-### P0: restore TLS verification for OIDC
+### P0: restore TLS verification for OIDC (closed upstream, 2026-11-12)
 
-`docker-compose.prod.yml` and `k8s/frontend.yaml` set `NODE_TLS_REJECT_UNAUTHORIZED=0`, disabling certificate verification for every Node HTTPS request. Replace this with provider-specific CA trust through `NODE_EXTRA_CA_CERTS` or a publicly trusted certificate. Add an integration test proving an untrusted provider certificate fails while the configured CA succeeds.
+At the audited commit, `docker-compose.prod.yml` and `k8s/frontend.yaml` set `NODE_TLS_REJECT_UNAUTHORIZED=0`, disabling certificate verification for every Node HTTPS request. Upstream v1.13 no longer sets it. A private CA is trusted through `OIDC_CA_BUNDLE` on the backend and `NODE_EXTRA_CA_CERTS` on the frontend, the backend verifies certificates in `DEBUG` mode too, and `backend/tests/test_deploy_env.py` fails if a deployment file turns verification off again. The integration test proposed here (an untrusted provider certificate fails while the configured CA succeeds) was not checked against upstream's tests.
 
 ### P0: constrain user-configurable outbound requests
 
@@ -31,6 +33,8 @@ Authenticated users can store AI endpoint URLs and notification destinations. Ba
 
 Base Compose publishes PostgreSQL and Redis ports and permits default database, API JWT, and NextAuth secrets. Public and family deployments must fail closed when secrets are missing, bind data services only to an internal network or `127.0.0.1`, and expose only the intended HTTPS entry point.
 
+Status, 2026-11-12: still open in upstream v1.13. Base `docker-compose.yml` still publishes the PostgreSQL and Redis ports and still falls back to default secrets. Upstream only narrowed the backend check: the default `SECRET_KEY` is accepted in `DEBUG` mode only when neither OIDC nor forward-auth is configured.
+
 ## Before leaving loopback
 
 - Disable development credentials and backend `DEBUG` mode.
@@ -39,13 +43,13 @@ Base Compose publishes PostgreSQL and Redis ports and permits default database, 
 - Keep Tailscale ACLs as network boundary for family phase.
 - Back up PostgreSQL, uploaded images, provider configuration, and provider account data; test restore.
 - Set upload/body limits, storage quotas, and reverse-proxy request timeouts.
-- Verify rate limiting fails safely when Redis is unavailable and does not trust spoofable forwarding headers.
+- Decide whether rate limiting may keep allowing requests when Redis is unavailable, as it does in upstream v1.13. Forwarding headers are settled upstream (2026-11-12): `X-Forwarded-For` is trusted only as far as `TRUSTED_PROXY_COUNT`, and the default of 0 uses the connection address.
 
 ## Later hardening
 
 - Add per-user storage quotas and idempotency for background jobs.
 - Add concurrency limits for AI, image processing, and background removal.
-- Review seven-day backend JWT lifetime and revocation behavior.
+- Review seven-day backend JWT lifetime. Revocation exists in upstream v1.13 (2026-11-12): a token is bound to its sign-in identity, so replacing or unlinking that identity ends it, and a deactivated account is refused on every request (`docs/sign-in-identities.md`).
 - Add audit events for login, provider migration, family membership, endpoint changes, and notification destination changes.
 - Add security headers and a restrictive Content Security Policy before public hosting.
 - Add automated secret scanning, dependency review, SBOM generation, container scanning, and signed release images.

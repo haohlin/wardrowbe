@@ -1,5 +1,7 @@
 # Native iOS Dual OIDC Implementation Plan
 
+> **Status, 2026-11-12:** Historical record. Upstream v1.13 superseded the backend steps of Task 1: upstream now binds API tokens to `users.id` plus a sign-in identity row, and an account holds one OIDC identity at a time, so sessions from the two Dex methods take turns instead of staying valid together. The runtime from Task 2 manages four processes instead of three. Current behaviour is in `docs/AUTH_AND_DEPLOYMENT.md` and `deploy/tailscale-oidc/README.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Run Wardrowbe privately over Tailscale so the official iOS app can use the local API and authenticate through Dex with either Tailscale identity or one local password.
