@@ -30,6 +30,8 @@ def test_setup_owner_email_migration_is_explicit_and_recoverable():
     assert "WARDROWBE_MIGRATE_OWNER_EMAIL" in setup
     assert "owner-email-before-migration" in setup
     assert "item_count" in setup
+    assert "UPDATE users SET email = $1, email_verified = true WHERE id = $2" in setup
+    assert "PREVIOUS_EMAIL_VERIFIED=" in setup
 
 
 def test_wardrowbe_runtime_forces_oidc_and_loopback():
@@ -46,6 +48,16 @@ def test_wardrowbe_runtime_forces_oidc_and_loopback():
     assert 'job_label="com.wardrowbe.$name"' in runtime
     assert '"$deploy_dir/wardrowbe.sh" "__$name"' in runtime
     assert 'launchctl remove "$job_label"' in runtime
+
+
+def test_wardrowbe_runtime_manages_both_workers():
+    runtime = read("wardrowbe.sh")
+    assert "arq app.workers.worker.WorkerSettings" in runtime
+    assert "arq app.workers.image_worker.ImageWorkerSettings" in runtime
+    assert "__image-worker) run_image_worker ;;" in runtime
+    assert "start_job image-worker" in runtime
+    assert "stop_one image-worker" in runtime
+    assert "for name in backend worker image-worker frontend; do" in runtime
 
 
 def test_check_requires_mobile_client_and_dev_mode_off():

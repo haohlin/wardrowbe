@@ -41,6 +41,20 @@ run_worker() {
   exec ../.venv/bin/arq app.workers.worker.WorkerSettings
 }
 
+run_image_worker() {
+  exec >>"$runtime_dir/image-worker.log" 2>&1
+  require_runtime
+  set -a
+  # shellcheck disable=SC1091
+  source "$repo_root/backend/.env"
+  # shellcheck disable=SC1090
+  source "$app_env"
+  set +a
+  export DEBUG="false"
+  cd "$repo_root/backend"
+  exec ../.venv/bin/arq app.workers.image_worker.ImageWorkerSettings
+}
+
 run_frontend() {
   exec >>"$runtime_dir/frontend.log" 2>&1
   require_runtime
@@ -82,6 +96,7 @@ start_processes() {
 
   start_job backend
   start_job worker
+  start_job image-worker
   start_job frontend
 
   for _ in {1..30}; do
@@ -116,7 +131,7 @@ stop_one() {
 
 status_processes() {
   local failed=0
-  for name in backend worker frontend; do
+  for name in backend worker image-worker frontend; do
     if is_running "$name"; then
       echo "$name: running"
     else
@@ -130,10 +145,12 @@ status_processes() {
 case "${1:-}" in
   __backend) run_backend ;;
   __worker) run_worker ;;
+  __image-worker) run_image_worker ;;
   __frontend) run_frontend ;;
   start) start_processes ;;
   stop)
     stop_one frontend
+    stop_one image-worker
     stop_one worker
     stop_one backend
     ;;

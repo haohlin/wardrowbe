@@ -67,10 +67,10 @@ async def main() -> None:
             if result == "mismatch" and sys.argv[2] == "1":
                 rows = await connection.fetch(
                     """
-                    SELECT u.id, u.email, count(i.id) AS item_count
+                    SELECT u.id, u.email, u.email_verified, count(i.id) AS item_count
                     FROM users u
                     LEFT JOIN clothing_items i ON i.user_id = u.id
-                    GROUP BY u.id, u.email
+                    GROUP BY u.id, u.email, u.email_verified
                     ORDER BY item_count DESC
                     """
                 )
@@ -82,10 +82,13 @@ async def main() -> None:
                     audit_path = Path(sys.argv[3])
                     audit_path.write_text(
                         f"USER_ID={owner['id']}\nPREVIOUS_EMAIL={owner['email']}\n"
+                        f"PREVIOUS_EMAIL_VERIFIED={str(owner['email_verified']).lower()}\n"
                     )
                     audit_path.chmod(0o600)
+                    # Upstream joins a sign-in to an account by email only when the account's
+                    # email is verified, so the owner's opt-in vouches for the address here.
                     await connection.execute(
-                        "UPDATE users SET email = $1 WHERE id = $2",
+                        "UPDATE users SET email = $1, email_verified = true WHERE id = $2",
                         sys.argv[1].lower(),
                         owner["id"],
                     )
@@ -111,7 +114,7 @@ PY
     return 1
   fi
   if [[ "$result" == "migrated" ]]; then
-    echo "Migrated populated Wardrowbe owner email to the Tailscale login"
+    echo "Migrated populated Wardrowbe owner email to the Tailscale login and marked it verified"
   fi
 }
 
