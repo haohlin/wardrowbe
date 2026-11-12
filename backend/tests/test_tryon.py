@@ -249,3 +249,92 @@ async def test_comparison_image_aligns_detected_face(
     comparison = Image.open(tmp_path / record.comparison_image_path)
     assert comparison.size == (48, 64)
     assert sum(comparison.getpixel((24, 16))) < 100
+
+
+@pytest.mark.asyncio
+async def test_shared_saved_photo_survives_until_last_tryon_is_deleted(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    test_user,
+    auth_headers,
+    tmp_path,
+):
+    outfit = await _outfit(db_session, test_user.id)
+    storage = ImageService(str(tmp_path))
+    saved = await storage.process_and_store(test_user.id, _jpeg(), "saved-person.jpg")
+    test_user.tryon_person_image_path = saved["image_path"]
+    records = [
+        TryOn(user_id=test_user.id, outfit_id=outfit.id, person_image_path=saved["image_path"])
+        for _ in range(2)
+    ]
+    db_session.add_all(records)
+    await db_session.commit()
+    first_id, last_id = (record.id for record in records)
+    saved_file = tmp_path / saved["image_path"]
+
+    with (
+        patch("app.api.users.ImageService", return_value=storage),
+        patch("app.api.tryon.ImageService", return_value=storage),
+    ):
+        replaced = await client.post(
+            "/api/v1/users/me/tryon-photo",
+            headers=auth_headers,
+            files={"photo": ("person.jpg", _jpeg(), "image/jpeg")},
+        )
+        assert replaced.status_code == 200
+        assert saved_file.is_file()
+
+        first = await client.delete(f"/api/v1/tryon/{first_id}", headers=auth_headers)
+        assert first.status_code == 204
+        assert saved_file.is_file()
+
+        last = await client.delete(f"/api/v1/tryon/{last_id}", headers=auth_headers)
+        assert last.status_code == 204
+        assert not saved_file.exists()
+
+    await db_session.refresh(test_user)
+    assert test_user.tryon_person_image_path != saved["image_path"]
+    assert (tmp_path / test_user.tryon_person_image_path).is_file()
+
+
+@pytest.mark.asyncio
+async def test_worker_failure_removes_generated_files(
+    db_session: AsyncSession,
+    test_user,
+    tmp_path,
+    monkeypatch,
+):
+    outfit = await _outfit(db_session, test_user.id)
+    user_dir = tmp_path / str(test_user.id)
+    user_dir.mkdir()
+    (user_dir / "person.jpg").write_bytes(_jpeg())
+    (user_dir / "shirt.jpg").write_bytes(_jpeg())
+    record = TryOn(
+        user_id=test_user.id,
+        outfit_id=outfit.id,
+        person_image_path=f"{test_user.id}/person.jpg",
+    )
+    db_session.add(record)
+    await db_session.commit()
+
+    def _crash(_):
+        raise RuntimeError("face detection crashed")
+
+    monkeypatch.setattr("app.workers.tryon.detect_face_center", _crash)
+    service = AsyncMock()
+    service.generate.return_value = (_jpeg(), "test-model")
+    with (
+        patch("app.workers.tryon.get_db_session", return_value=db_session),
+        patch(
+            "app.workers.tryon.ImageService",
+            return_value=ImageService(str(tmp_path)),
+        ),
+        patch("app.workers.tryon.TryOnService", return_value=service),
+        patch.object(db_session, "close", new_callable=AsyncMock),
+    ):
+        await generate_tryon({}, str(record.id))
+
+    await db_session.refresh(record)
+    assert record.status == TryOnStatus.failed
+    assert record.result_image_path is None
+    assert sorted(path.name for path in user_dir.iterdir()) == ["person.jpg", "shirt.jpg"]

@@ -13,6 +13,7 @@ from app.models.outfit import Outfit
 from app.models.schedule import Schedule
 from app.models.user import User
 from app.services.image_service import ImageService
+from app.services.tryon_service import person_image_in_use
 from app.services.user_service import UserService
 from app.utils.auth import get_current_user
 from app.utils.locale import SUPPORTED_LOCALES, is_supported_locale
@@ -159,10 +160,9 @@ async def upload_tryon_photo(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     current_user.tryon_person_image_path = paths["image_path"]
-    if old_path:
-        _delete_image_variants(storage, old_path)
     await db.commit()
     await db.refresh(current_user)
+    await _delete_unused_tryon_photo(db, storage, current_user, old_path)
     return _user_response(current_user)
 
 
@@ -171,23 +171,18 @@ async def delete_tryon_photo(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> None:
-    storage = ImageService()
-    _delete_image_variants(storage, current_user.tryon_person_image_path)
+    old_path = current_user.tryon_person_image_path
     current_user.tryon_person_image_path = None
     await db.commit()
+    await _delete_unused_tryon_photo(db, ImageService(), current_user, old_path)
 
 
-def _delete_image_variants(storage: ImageService, path: str | None) -> None:
-    if not path:
-        return
-    base = path.rsplit(".", 1)[0]
-    storage.delete_images(
-        {
-            "original": path,
-            "medium": f"{base}_medium.jpg",
-            "thumbnail": f"{base}_thumb.jpg",
-        }
-    )
+async def _delete_unused_tryon_photo(
+    db: AsyncSession, storage: ImageService, user: User, path: str | None
+) -> None:
+    # Try-ons created from the saved photo keep pointing at its file.
+    if path and not await person_image_in_use(db, user.id, path):
+        storage.delete_image_variants(path)
 
 
 def _user_response(user: User) -> UserProfileResponse:

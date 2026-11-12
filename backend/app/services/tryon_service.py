@@ -2,16 +2,30 @@ import base64
 import logging
 import mimetypes
 from pathlib import Path
+from uuid import UUID
 
 import httpx
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.models.tryon import TryOn
 
 logger = logging.getLogger(__name__)
 
 
 class TryOnProviderError(RuntimeError):
     pass
+
+
+async def person_image_in_use(
+    db: AsyncSession, user_id: UUID, image_path: str, exclude_tryon_id: UUID | None = None
+) -> bool:
+    """Whether a try-on still points at this person image; a saved photo is shared by many."""
+    query = select(TryOn.id).where(TryOn.user_id == user_id, TryOn.person_image_path == image_path)
+    if exclude_tryon_id is not None:
+        query = query.where(TryOn.id != exclude_tryon_id)
+    return await db.scalar(query.limit(1)) is not None
 
 
 class TryOnService:
@@ -48,7 +62,9 @@ class TryOnService:
         if not garment_paths:
             raise TryOnProviderError("The outfit has no usable garment images")
 
-        paths = [person_path, *garment_paths[:10]]
+        # The prompt must state the number of garment images actually sent.
+        garment_paths = garment_paths[:10]
+        paths = [person_path, *garment_paths]
         last_error: Exception | None = None
         timeout = httpx.Timeout(max(self.settings.ai_timeout, 180))
 

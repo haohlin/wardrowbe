@@ -159,23 +159,20 @@ class ImageService:
             "image_hash": image_hash,
         }
 
-    async def create_tryon_comparison_image(
+    def create_tryon_comparison_image(
         self,
         user_id: uuid.UUID,
-        image_data: bytes,
-        original_filename: str,
+        source_path: Path,
         reference_size: tuple[int, int],
         source_face_center: tuple[float, float] | None = None,
         reference_face_center: tuple[float, float] | None = None,
     ) -> str:
-        """Store an output-sized, center-cropped version for before/after comparison."""
-        ext = Path(original_filename).suffix.lower()
-        image = (
-            self._convert_heic(image_data)
-            if ext in {".heic", ".heif"}
-            else Image.open(BytesIO(image_data))
-        )
-        image = self._normalize_orientation(image).convert("RGB")
+        """Store an output-sized, center-cropped version for before/after comparison.
+
+        source_path is a stored original, which process_and_store always writes as JPEG.
+        """
+        with Image.open(source_path) as source:
+            image = self._normalize_orientation(source).convert("RGB")
         target_width, target_height = reference_size
         scale = max(target_width / image.width, target_height / image.height)
         resized = image.resize(
@@ -211,6 +208,19 @@ class ImageService:
                 full_path = self.storage_path / path
                 if full_path.exists():
                     full_path.unlink()
+
+    def delete_image_variants(self, image_path: str | None) -> None:
+        """Delete an image stored by process_and_store together with its derived sizes."""
+        if not image_path:
+            return
+        base_path = image_path.rsplit(".", 1)[0]
+        self.delete_images(
+            {
+                "original": image_path,
+                "medium": f"{base_path}_medium.jpg",
+                "thumbnail": f"{base_path}_thumb.jpg",
+            }
+        )
 
     def validate_image(
         self,

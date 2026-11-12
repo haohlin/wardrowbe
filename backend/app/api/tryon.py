@@ -14,6 +14,7 @@ from app.models.tryon import TryOn, TryOnStatus
 from app.models.user import User
 from app.schemas.tryon import TryOnListResponse, TryOnQuotaResponse, TryOnResponse
 from app.services.image_service import ImageService
+from app.services.tryon_service import person_image_in_use
 from app.utils.auth import get_current_user
 from app.workers.settings import get_redis_settings
 
@@ -25,17 +26,11 @@ def _response(record: TryOn) -> TryOnResponse:
     return TryOnResponse.model_validate(record)
 
 
-def _delete_image_variants(image_service: ImageService, path: str | None) -> None:
-    if not path:
-        return
-    relative = path.rsplit(".", 1)[0]
-    image_service.delete_images(
-        {
-            "original": path,
-            "medium": f"{relative}_medium.jpg",
-            "thumbnail": f"{relative}_thumb.jpg",
-        }
-    )
+async def _get_owned_tryon(db: AsyncSession, tryon_id: UUID, user: User) -> TryOn:
+    record = await db.scalar(select(TryOn).where(TryOn.id == tryon_id, TryOn.user_id == user.id))
+    if record is None:
+        raise HTTPException(status_code=404, detail="Try-on not found")
+    return record
 
 
 @router.get("/quota", response_model=TryOnQuotaResponse)
@@ -95,13 +90,7 @@ async def get_tryon(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> TryOnResponse:
-    result = await db.execute(
-        select(TryOn).where(TryOn.id == tryon_id, TryOn.user_id == current_user.id)
-    )
-    record = result.scalar_one_or_none()
-    if record is None:
-        raise HTTPException(status_code=404, detail="Try-on not found")
-    return _response(record)
+    return _response(await _get_owned_tryon(db, tryon_id, current_user))
 
 
 @router.post("/outfit", response_model=TryOnResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -188,15 +177,16 @@ async def delete_tryon(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> None:
-    record = await db.scalar(
-        select(TryOn).where(TryOn.id == tryon_id, TryOn.user_id == current_user.id)
-    )
-    if record is None:
-        raise HTTPException(status_code=404, detail="Try-on not found")
-    image_service = ImageService()
-    if record.person_image_path != current_user.tryon_person_image_path:
-        _delete_image_variants(image_service, record.person_image_path)
-    _delete_image_variants(image_service, record.comparison_image_path)
-    _delete_image_variants(image_service, record.result_image_path)
+    record = await _get_owned_tryon(db, tryon_id, current_user)
+    person_image_path = record.person_image_path
+    owned_image_paths = [record.comparison_image_path, record.result_image_path]
+    # A saved photo is shared with the profile and with other try-ons.
+    if person_image_path != current_user.tryon_person_image_path and not await person_image_in_use(
+        db, current_user.id, person_image_path, exclude_tryon_id=record.id
+    ):
+        owned_image_paths.append(person_image_path)
     await db.delete(record)
     await db.commit()
+    image_service = ImageService()
+    for path in owned_image_paths:
+        image_service.delete_image_variants(path)

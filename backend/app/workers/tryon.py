@@ -1,5 +1,7 @@
+import asyncio
 import logging
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import UUID
 
 from PIL import Image
@@ -16,9 +18,25 @@ from app.workers.db import get_db_session
 logger = logging.getLogger(__name__)
 
 
+def _store_comparison_image(
+    storage: ImageService, user_id: UUID, person_path: Path, result_path: Path
+) -> str:
+    # Blocking (swift face detection, PIL resize): run it off the shared worker event loop.
+    with Image.open(result_path) as result_image:
+        result_size = result_image.size
+    return storage.create_tryon_comparison_image(
+        user_id,
+        person_path,
+        result_size,
+        detect_face_center(person_path),
+        detect_face_center(result_path),
+    )
+
+
 async def generate_tryon(ctx: dict, tryon_id: str) -> None:
     db = get_db_session(ctx)
     record: TryOn | None = None
+    stored_paths: list[str] = []
     try:
         result = await db.execute(select(TryOn).where(TryOn.id == UUID(tryon_id)))
         record = result.scalar_one_or_none()
@@ -42,26 +60,23 @@ async def generate_tryon(ctx: dict, tryon_id: str) -> None:
             .order_by(OutfitItem.position)
         )
         garment_paths = [
-            storage.get_image_path(path)
-            for path in item_result.scalars().all()
-            if storage.get_image_path(path).is_file()
+            path
+            for path in map(storage.get_image_path, item_result.scalars().all())
+            if path.is_file()
         ]
 
         generated, model = await TryOnService().generate(person_path, garment_paths)
         paths = await storage.process_and_store(record.user_id, generated, f"tryon-{record.id}.png")
-        result_path = storage.get_image_path(paths["image_path"])
-        with Image.open(result_path) as result_image:
-            result_size = result_image.size
-        source_face_center = detect_face_center(person_path)
-        result_face_center = detect_face_center(result_path)
-        record.comparison_image_path = await storage.create_tryon_comparison_image(
+        stored_paths.append(paths["image_path"])
+        comparison_image_path = await asyncio.to_thread(
+            _store_comparison_image,
+            storage,
             record.user_id,
-            person_path.read_bytes(),
-            person_path.name,
-            result_size,
-            source_face_center,
-            result_face_center,
+            person_path,
+            storage.get_image_path(paths["image_path"]),
         )
+        stored_paths.append(comparison_image_path)
+        record.comparison_image_path = comparison_image_path
         record.result_image_path = paths["image_path"]
         record.model = model
         record.status = TryOnStatus.completed
@@ -71,6 +86,9 @@ async def generate_tryon(ctx: dict, tryon_id: str) -> None:
     except Exception as exc:
         logger.exception("Try-on %s failed", tryon_id)
         await db.rollback()
+        # Nothing references these once the run fails (or the row was deleted mid-run).
+        for path in stored_paths:
+            storage.delete_image_variants(path)
         if record is None:
             result = await db.execute(select(TryOn).where(TryOn.id == UUID(tryon_id)))
             record = result.scalar_one_or_none()
