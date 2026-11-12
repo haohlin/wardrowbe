@@ -7,7 +7,8 @@ from pathlib import Path
 VERSIONS_DIR = Path(__file__).resolve().parent.parent / "migrations" / "versions"
 
 REV_RE = re.compile(r'^revision:\s*str\s*=\s*"(.+?)"', re.MULTILINE)
-DOWN_RE = re.compile(r'^down_revision:\s*str\s*\|\s*None\s*=\s*"(.+?)"', re.MULTILINE)
+DOWN_RE = re.compile(r"^down_revision:[^=\n]*=\s*(.+)$", re.MULTILINE)
+ID_RE = re.compile(r'"(.+?)"')
 
 
 def main() -> int:
@@ -35,7 +36,7 @@ def main() -> int:
         revisions[rev_id] = str(path)
 
         if down_match:
-            down_refs.add(down_match.group(1))
+            down_refs.update(ID_RE.findall(down_match.group(1)))
 
     heads = set(revisions.keys()) - down_refs
 
