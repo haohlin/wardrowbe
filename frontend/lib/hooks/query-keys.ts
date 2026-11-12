@@ -13,6 +13,7 @@ const FAMILY_OUTFITS = ['familyOutfits'] as const;
 const ANALYTICS = ['analytics'] as const;
 const LEARNING = ['learning'] as const;
 const PAIRINGS = ['pairings'] as const;
+const TRYONS = ['tryons'] as const;
 const ITEM = ['item'] as const;
 const WEAR_STATS = ['wear-stats'] as const;
 const WEAR_HISTORY = ['wear-history'] as const;
@@ -89,6 +90,13 @@ export const queryKeys = {
     forItemPage: (itemId: string, page: number, pageSize: number) =>
       [...PAIRINGS, 'item', itemId, page, pageSize] as const,
   },
+
+  tryOns: {
+    all: TRYONS,
+    list: (outfitId: string | undefined, page: number, pageSize: number) =>
+      [...TRYONS, outfitId, page, pageSize] as const,
+  },
+  tryOnQuota: ['tryon-quota'] as const,
 
   notificationSettings: ['notification-settings'] as const,
   ntfyDefaults: ['ntfy-defaults'] as const,

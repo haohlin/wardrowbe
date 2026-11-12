@@ -47,6 +47,7 @@ const BODY_FIELDS = ['height', 'weight', 'chest', 'waist', 'hips', 'inseam'] as 
 const SIZE_FIELDS = ['shirt_size', 'pants_size', 'dress_size', 'shoe_size'] as const;
 const STYLE_VALUES = ['bold', 'casual', 'formal', 'minimalist', 'sporty'] as const;
 const WEATHER_CONDITIONS = ['clear', 'cloudy', 'rain', 'snow'] as const;
+const TRYON_STATUSES = ['pending', 'processing', 'completed', 'failed'] as const;
 
 const DYNAMIC_KEYS: Array<[string, readonly string[]]> = [
   ['constants.types', CLOTHING_TYPES.map((t) => t.value)],
@@ -61,6 +62,7 @@ const DYNAMIC_KEYS: Array<[string, readonly string[]]> = [
   ['wardrobe.sort', WARDROBE_SORTS],
   ['settings.body.fields', BODY_FIELDS],
   ['settings.body.sizePlaceholders', SIZE_FIELDS],
+  ['tryon', TRYON_STATUSES],
 ];
 
 describe('runtime-built translation keys', () => {
