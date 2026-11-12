@@ -197,6 +197,44 @@ class ImageService:
             image.crop(box).save(output, format="JPEG", quality=VARIANTS[0].quality, optimize=True)
             return output.getvalue()
 
+    def create_tryon_comparison_image(
+        self,
+        user_id: uuid.UUID,
+        source_path: Path,
+        reference_size: tuple[int, int],
+        source_face_center: tuple[float, float] | None = None,
+        reference_face_center: tuple[float, float] | None = None,
+    ) -> str:
+        """Store an output-sized, center-cropped version for before/after comparison.
+
+        source_path is a stored original, which process_and_store always writes as JPEG.
+        """
+        with Image.open(source_path) as source:
+            image = source.convert("RGB")
+        target_width, target_height = reference_size
+        scale = max(target_width / image.width, target_height / image.height)
+        resized = image.resize(
+            (round(image.width * scale), round(image.height * scale)), Image.Resampling.LANCZOS
+        )
+        left = (resized.width - target_width) / 2
+        top = (resized.height - target_height) / 2
+        if source_face_center and reference_face_center:
+            source_x = source_face_center[0] * resized.width
+            source_y = (1 - source_face_center[1]) * resized.height
+            reference_x = reference_face_center[0] * target_width
+            reference_y = (1 - reference_face_center[1]) * target_height
+            left = source_x - reference_x
+            top = source_y - reference_y
+        left = round(max(0, min(left, resized.width - target_width)))
+        top = round(max(0, min(top, resized.height - target_height)))
+        cropped = resized.crop((left, top, left + target_width, top + target_height))
+        filename = self._generate_filename(".jpg")
+        path = self._get_user_path(user_id) / filename
+        output = BytesIO()
+        cropped.save(output, format="JPEG", quality=92, optimize=True)
+        path.write_bytes(output.getvalue())
+        return f"{user_id}/{filename}"
+
     def get_image_path(self, relative_path: str) -> Path:
         """Get full path for an image."""
         return self.storage_path / relative_path
@@ -208,6 +246,15 @@ class ImageService:
                 full_path = self.storage_path / path
                 if full_path.exists():
                     full_path.unlink()
+
+    def delete_image_variants(self, image_path: str | None) -> None:
+        """Delete an image stored by process_and_store together with its derived sizes."""
+        if not image_path:
+            return
+        base_path = image_path.rsplit(".", 1)[0]
+        self.delete_images(
+            {variant.path_field: f"{base_path}{variant.suffix}.jpg" for variant in VARIANTS}
+        )
 
     def validate_image(
         self, image_data: bytes, content_type: str, filename: str | None = None

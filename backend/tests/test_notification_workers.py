@@ -1121,5 +1121,6 @@ class TestWorkerFunctionRegistry:
             "check_scheduled_notifications",
             "check_wash_reminders",
             "update_learning_profiles",
+            "generate_tryon",
         }
         assert func_names == expected

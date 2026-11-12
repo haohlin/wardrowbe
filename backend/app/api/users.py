@@ -1,20 +1,27 @@
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.datastructures import UploadFile
 
+from app.config import get_settings
 from app.database import DbSession
 from app.models.item import ClothingItem, ItemStatus
 from app.models.outfit import Outfit
 from app.models.schedule import Schedule
 from app.models.user import User
 from app.schemas.user import DisplayName, Latitude, Longitude, PlaceName
+from app.services.image_service import ImageService
+from app.services.tryon_service import person_image_in_use
 from app.services.user_service import UserService
 from app.utils.auth import get_current_user
 from app.utils.locale import SUPPORTED_LOCALES, is_supported_locale
 from app.utils.numbers import is_finite_number
+from app.utils.signed_urls import sign_optional
 from app.utils.timezone import is_valid_timezone
+from app.utils.uploads import UploadTooLargeError, read_upload_within_limit
 
 router = APIRouter(prefix="/users/me", tags=["Users"])
 
@@ -34,6 +41,7 @@ class UserProfileResponse(BaseModel):
     email: str
     display_name: str
     avatar_url: str | None = None
+    tryon_person_image_url: str | None = None
     timezone: str
     locale: str
     location_lat: float | None = None
@@ -155,12 +163,71 @@ async def update_profile(
     return _user_response(current_user)
 
 
+@router.post("/tryon-photo", response_model=UserProfileResponse)
+async def upload_tryon_photo(
+    request: Request,
+    db: DbSession,
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> UserProfileResponse:
+    form = await request.form()
+    upload = form.get("photo")
+    if not isinstance(upload, UploadFile):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="A photo is required"
+        )
+
+    try:
+        content = await read_upload_within_limit(upload, get_settings().max_upload_size_mb)
+    except UploadTooLargeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=str(exc)
+        ) from None
+    storage = ImageService()
+    content_type = upload.content_type or "application/octet-stream"
+    if not storage.validate_image(content, content_type, upload.filename):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid try-on photo")
+
+    old_path = current_user.tryon_person_image_path
+    try:
+        paths = await storage.process_and_store(
+            current_user.id, content, upload.filename or "tryon-person.jpg"
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    current_user.tryon_person_image_path = paths["image_path"]
+    await db.commit()
+    await db.refresh(current_user)
+    await _delete_unused_tryon_photo(db, storage, current_user, old_path)
+    return _user_response(current_user)
+
+
+@router.delete("/tryon-photo", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_tryon_photo(
+    db: DbSession,
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> None:
+    old_path = current_user.tryon_person_image_path
+    current_user.tryon_person_image_path = None
+    await db.commit()
+    await _delete_unused_tryon_photo(db, ImageService(), current_user, old_path)
+
+
+async def _delete_unused_tryon_photo(
+    db: AsyncSession, storage: ImageService, user: User, path: str | None
+) -> None:
+    # Try-ons created from the saved photo keep pointing at its file.
+    if path and not await person_image_in_use(db, user.id, path):
+        storage.delete_image_variants(path)
+
+
 def _user_response(user: User) -> UserProfileResponse:
     return UserProfileResponse(
         id=str(user.id),
         email=user.email,
         display_name=user.display_name,
         avatar_url=user.avatar_url,
+        tryon_person_image_url=sign_optional(user.tryon_person_image_path),
         timezone=user.timezone,
         locale=user.locale,
         location_lat=float(user.location_lat) if user.location_lat is not None else None,

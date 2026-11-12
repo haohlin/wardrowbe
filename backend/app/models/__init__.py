@@ -11,6 +11,7 @@ from app.models.notification import Notification, NotificationSettings
 from app.models.outfit import FamilyOutfitRating, Outfit, OutfitItem, UserFeedback
 from app.models.preference import UserPreference
 from app.models.schedule import Schedule
+from app.models.tryon import TryOn, TryOnStatus
 from app.models.user import User
 
 __all__ = [
@@ -34,4 +35,6 @@ __all__ = [
     "OutfitItem",
     "UserFeedback",
     "Notification",
+    "TryOn",
+    "TryOnStatus",
 ]
