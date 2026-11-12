@@ -8,6 +8,7 @@ import {
   FORWARD_AUTH_SERVER_ERROR,
   FORWARD_AUTH_USERNAME_CONFLICT,
 } from '@/lib/auth-errors';
+import { selectAuthProviderIds } from '@/lib/auth-providers';
 import { decodeProxyHeader, proxySecretMatches } from '@/lib/proxy-headers';
 
 interface OIDCProfile {
@@ -213,12 +214,11 @@ const ForwardAuthProvider = CredentialsProvider({
 function getProviders() {
   const providers: Provider[] = [ForwardAuthProvider];
 
-  if (process.env.OIDC_ISSUER_URL) {
-    providers.push(OIDCProvider);
-  }
-
-  if (process.env.DEV_MODE === 'true' || process.env.NODE_ENV === 'development') {
-    providers.push(DevCredentialsProvider);
+  for (const providerId of selectAuthProviderIds({
+    oidcIssuerUrl: process.env.OIDC_ISSUER_URL,
+    devMode: process.env.DEV_MODE,
+  })) {
+    providers.push(providerId === 'oidc' ? OIDCProvider : DevCredentialsProvider);
   }
   return providers;
 }
