@@ -304,6 +304,27 @@ class TestTagParsing:
         tags = service._parse_tags_from_response('{"type": "jacket", "material": "down"}')
         assert tags.material == "down"
 
+    def test_parse_provider_aliases_and_scalar_lists(self):
+        service = AIService()
+        tags = service._parse_tags_from_response(
+            """{
+                "category": "shirt",
+                "sub_type": "button-down",
+                "dominant_color": "navy",
+                "colors": "navy",
+                "style": "classic",
+                "season": "fall"
+            }"""
+        )
+
+        assert tags.type == "shirt"
+        assert tags.unrecognized_type is None
+        assert tags.subtype == "button-down"
+        assert tags.primary_color == "navy"
+        assert tags.colors == ["navy"]
+        assert tags.style == ["classic"]
+        assert tags.season == ["fall"]
+
 
 class TestClothingTags:
     """Tests for ClothingTags model."""
@@ -336,6 +357,28 @@ class TestClothingTags:
         assert tags.primary_color == "navy"
         assert len(tags.colors) == 2
         assert tags.confidence == 0.92
+
+
+class TestChatRequestCompatibility:
+    _MESSAGES = [{"role": "user", "content": "hello"}]
+
+    def test_gpt5_uses_completion_tokens_and_omits_temperature(self):
+        service = AIService()
+
+        body = service._chat_request_body("openai/gpt-5.5", self._MESSAGES, temperature=0.4)
+
+        assert body["max_completion_tokens"] == service.settings.ai_max_tokens
+        assert "max_tokens" not in body
+        assert "temperature" not in body
+
+    def test_other_models_keep_standard_fields(self):
+        service = AIService()
+
+        body = service._chat_request_body("gpt-4o", self._MESSAGES, temperature=0.4)
+
+        assert body["max_tokens"] == service.settings.ai_max_tokens
+        assert "max_completion_tokens" not in body
+        assert body["temperature"] == 0.4
 
 
 class TestGenerateTextTruncatedResponse:

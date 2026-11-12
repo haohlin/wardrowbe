@@ -316,6 +316,22 @@ class AIService:
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
 
+    def _chat_request_body(
+        self, model: str, messages: list, temperature: float | None = None
+    ) -> dict:
+        # GPT-5 family endpoints reject max_tokens and any non-default temperature.
+        uses_completion_tokens = "gpt-5" in model.lower()
+        token_limit_key = "max_completion_tokens" if uses_completion_tokens else "max_tokens"
+        body = {
+            "model": model,
+            "messages": messages,
+            "stream": False,
+            token_limit_key: self.settings.ai_max_tokens,
+        }
+        if temperature is not None and not uses_completion_tokens:
+            body["temperature"] = temperature
+        return body
+
     def _preprocess_image(self, image_path: str | Path) -> str:
         """
         Preprocess image for AI analysis.
@@ -400,7 +416,19 @@ class AIService:
         tags = ClothingTags()
         tags.raw_response = response_text
 
-        raw_type = data.get("type")
+        def first_text(*keys: str) -> str | None:
+            # Providers do not all answer with the key names the prompt asks for.
+            for key in keys:
+                value = data.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+            return None
+
+        def as_list(value: object) -> object:
+            # A single value sometimes arrives as a bare string instead of a list.
+            return [value] if isinstance(value, str) else value
+
+        raw_type = first_text("type", "item_type", "category")
         item_type = validate_value(raw_type, VALID_TYPES)
         if item_type:
             tags.type = item_type
@@ -410,16 +438,16 @@ class AIService:
                 tags.unrecognized_type = raw_type.strip().lower()[:50]
                 logger.warning(f"AI returned unsupported item type: {tags.unrecognized_type!r}")
 
-        tags.subtype = data.get("subtype") if data.get("subtype") else None
-        raw_primary_color = data.get("primary_color")
-        if isinstance(raw_primary_color, str):
+        tags.subtype = first_text("subtype", "sub_type")
+        raw_primary_color = first_text("primary_color", "color", "main_color", "dominant_color")
+        if raw_primary_color:
             tags.primary_color = normalize_color(raw_primary_color)
-        tags.colors = validate_colors(data.get("colors"))
+        tags.colors = validate_colors(as_list(data.get("colors")))
         tags.pattern = validate_value(data.get("pattern"), VALID_PATTERNS)
         tags.material = validate_value(data.get("material"), VALID_MATERIALS)
         tags.formality = validate_value(data.get("formality"), VALID_FORMALITY)
-        tags.style = validate_list(data.get("style", []), VALID_STYLES)
-        tags.season = validate_list(data.get("season", []), VALID_SEASONS)
+        tags.style = validate_list(as_list(data.get("style", [])), VALID_STYLES)
+        tags.season = validate_list(as_list(data.get("season", [])), VALID_SEASONS)
         tags.fit = validate_value(data.get("fit"), VALID_FIT)
         tags.confidence = compute_tag_completeness(tags)
 
@@ -449,12 +477,7 @@ class AIService:
                 attempt = 0
                 while attempt < self.settings.ai_max_retries:
                     try:
-                        request_body = {
-                            "model": model,
-                            "messages": messages,
-                            "stream": False,
-                            "max_tokens": self.settings.ai_max_tokens,
-                        }
+                        request_body = self._chat_request_body(model, messages)
                         if use_logprobs:
                             request_body["logprobs"] = True
                             request_body["top_logprobs"] = 3
@@ -769,13 +792,9 @@ class AIService:
             async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=True) as client:
                 for attempt in range(self.settings.ai_max_retries):
                     try:
-                        request_body = {
-                            "model": endpoint.text_model,
-                            "messages": messages,
-                            "stream": False,
-                            "temperature": 0.4,
-                            "max_tokens": self.settings.ai_max_tokens,
-                        }
+                        request_body = self._chat_request_body(
+                            endpoint.text_model, messages, temperature=0.4
+                        )
                         if use_reasoning_effort and current_reasoning_effort:
                             request_body["reasoning_effort"] = current_reasoning_effort
 
