@@ -48,7 +48,12 @@ IMAGE_MIME_TYPES = {
     ".heif": "image/heif",
 }
 ALLOWED_EXTENSIONS = frozenset(IMAGE_MIME_TYPES)
-ALLOWED_MIME_TYPES = frozenset(IMAGE_MIME_TYPES.values())
+# Upload-only types: iOS sends bursts as *-sequence, and native clients may send no type at all.
+HEIC_MIME_TYPES = frozenset(
+    {"image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence"}
+)
+GENERIC_MIME_TYPE = "application/octet-stream"
+ALLOWED_MIME_TYPES = frozenset(IMAGE_MIME_TYPES.values()) | HEIC_MIME_TYPES | {GENERIC_MIME_TYPE}
 
 
 def _flatten_to_rgb(image: Image.Image) -> Image.Image:
@@ -204,10 +209,17 @@ class ImageService:
                 if full_path.exists():
                     full_path.unlink()
 
-    def validate_image(self, image_data: bytes, content_type: str) -> bool:
+    def validate_image(
+        self, image_data: bytes, content_type: str, filename: str | None = None
+    ) -> bool:
         """Validate image data and content type."""
         # Check content type
+        content_type = content_type.split(";", 1)[0].strip().lower()
+        extension = Path(filename or "").suffix.lower()
         if content_type not in ALLOWED_MIME_TYPES:
+            return False
+        # A generic type says nothing about the content, so the filename has to.
+        if content_type == GENERIC_MIME_TYPE and extension not in ALLOWED_EXTENSIONS:
             return False
 
         # Check file size (max 20MB)
@@ -216,7 +228,7 @@ class ImageService:
 
         # Try to open as image
         try:
-            if content_type in ("image/heic", "image/heif"):
+            if content_type in HEIC_MIME_TYPES or extension in (".heic", ".heif"):
                 self._convert_heic(image_data)
             else:
                 Image.open(BytesIO(image_data))
