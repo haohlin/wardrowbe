@@ -1,6 +1,6 @@
 'use client';
 
-import { ChangeEvent, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, useEffect, useState } from 'react';
 import Image from 'next/image';
 import { useTranslations } from 'next-intl';
 import { Camera, CheckCircle2, Clock3, Loader2, RefreshCw, Sparkles, Trash2, Upload } from 'lucide-react';
@@ -34,6 +34,7 @@ import { getErrorMessage } from '@/lib/api';
 import { useOutfits } from '@/lib/hooks/use-outfits';
 import {
   TryOn,
+  isTryOnActive,
   useCreateTryOn,
   useDeleteTryOn,
   useDeleteTryOnPhoto,
@@ -43,16 +44,9 @@ import {
 } from '@/lib/hooks/use-tryon';
 import { useUserProfile } from '@/lib/hooks/use-user';
 
-function outfitLabel(outfit: { name: string | null; occasion: string }) {
-  return outfit.name || `${outfit.occasion} outfit`;
-}
-
-function resultImage(record: TryOn) {
-  return record.result_image_url || record.image_url || record.generated_image_url;
-}
-
 export default function TryOnPage() {
   const t = useTranslations('tryon');
+  const tOutfits = useTranslations('outfits.cards');
   const { data: outfitsData, isLoading: outfitsLoading } = useOutfits({}, 1, 100);
   const { data: profile } = useUserProfile();
   const { data: quota } = useTryOnQuota();
@@ -65,19 +59,17 @@ export default function TryOnPage() {
   const [selectedOutfitId, setSelectedOutfitId] = useState<string>();
   const [photo, setPhoto] = useState<File>();
   const [previewUrl, setPreviewUrl] = useState<string>();
+  const [photoInputKey, setPhotoInputKey] = useState(0);
   const [useSavedPhoto, setUseSavedPhoto] = useState(false);
   const [savePhoto, setSavePhoto] = useState(false);
   const [tryOnToDelete, setTryOnToDelete] = useState<TryOn>();
   const [removeSavedPhotoOpen, setRemoveSavedPhotoOpen] = useState(false);
 
-  const outfits = useMemo(() => outfitsData?.outfits ?? [], [outfitsData?.outfits]);
+  const outfits = outfitsData?.outfits ?? [];
+  const outfitId = selectedOutfitId ?? outfits[0]?.id;
   const hasSavedPhoto = Boolean(profile?.tryon_person_image_url);
   const isBusy = createTryOn.isPending || uploadPhoto.isPending;
-  const canGenerate = Boolean(selectedOutfitId && (photo || (useSavedPhoto && hasSavedPhoto)) && quota?.can_generate !== false);
-
-  useEffect(() => {
-    if (!selectedOutfitId && outfits.length > 0) setSelectedOutfitId(outfits[0].id);
-  }, [outfits, selectedOutfitId]);
+  const canGenerate = Boolean(outfitId && (photo || (useSavedPhoto && hasSavedPhoto)) && quota?.can_generate !== false);
 
   useEffect(() => {
     if (hasSavedPhoto && !photo) setUseSavedPhoto(true);
@@ -90,14 +82,20 @@ export default function TryOnPage() {
   const handlePhotoChange = (event: ChangeEvent<HTMLInputElement>) => {
     const nextPhoto = event.target.files?.[0];
     if (!nextPhoto) return;
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
     setPhoto(nextPhoto);
     setPreviewUrl(URL.createObjectURL(nextPhoto));
     setUseSavedPhoto(false);
   };
 
+  const clearPhoto = () => {
+    setPhoto(undefined);
+    setPreviewUrl(undefined);
+    // The file input is uncontrolled: remount it so the same file can be picked again.
+    setPhotoInputKey((key) => key + 1);
+  };
+
   const handleGenerate = async () => {
-    if (!selectedOutfitId) {
+    if (!outfitId) {
       toast.error(t('noOutfits'));
       return;
     }
@@ -109,18 +107,16 @@ export default function TryOnPage() {
     try {
       if (photo && savePhoto) {
         await uploadPhoto.mutateAsync(photo);
-        await createTryOn.mutateAsync({ outfitId: selectedOutfitId, useSavedPhoto: true });
+        await createTryOn.mutateAsync({ outfitId, useSavedPhoto: true });
       } else {
         await createTryOn.mutateAsync({
-          outfitId: selectedOutfitId,
+          outfitId,
           photo,
           useSavedPhoto: useSavedPhoto && hasSavedPhoto,
         });
       }
       toast.success(t('queued'));
-      setPhoto(undefined);
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-      setPreviewUrl(undefined);
+      clearPhoto();
       if (savePhoto) setUseSavedPhoto(true);
       setSavePhoto(false);
     } catch (error) {
@@ -170,23 +166,25 @@ export default function TryOnPage() {
           <h1 className="text-2xl font-bold tracking-tight">{t('title')}</h1>
           <p className="mt-1 text-sm text-muted-foreground">{t('subtitle')}</p>
         </div>
-        <Badge variant="secondary">
-          {quota?.unlimited ? t('unlimited') : t('remaining', { count: quota?.remaining ?? 0 })}
-        </Badge>
+        {quota && (
+          <Badge variant="secondary">
+            {quota.unlimited ? t('unlimited') : t('remaining', { count: quota.remaining })}
+          </Badge>
+        )}
       </div>
 
       <Card>
         <CardContent className="grid gap-5 p-5 md:grid-cols-[1fr_1.2fr]">
           <div className="space-y-2">
             <Label htmlFor="tryon-outfit">{t('outfit')}</Label>
-            <Select value={selectedOutfitId} onValueChange={setSelectedOutfitId} disabled={outfitsLoading || outfits.length === 0}>
+            <Select value={outfitId} onValueChange={setSelectedOutfitId} disabled={outfitsLoading || outfits.length === 0}>
               <SelectTrigger id="tryon-outfit">
                 <SelectValue placeholder={t('selectOutfit')} />
               </SelectTrigger>
               <SelectContent>
                 {outfits.map((outfit) => (
                   <SelectItem key={outfit.id} value={outfit.id}>
-                    {outfitLabel(outfit)}
+                    {outfit.name || tOutfits('outfitFallback', { occasion: outfit.occasion })}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -206,11 +204,7 @@ export default function TryOnPage() {
                     checked={useSavedPhoto}
                     onCheckedChange={(checked) => {
                       setUseSavedPhoto(checked === true);
-                      if (checked) {
-                        setPhoto(undefined);
-                        if (previewUrl) URL.revokeObjectURL(previewUrl);
-                        setPreviewUrl(undefined);
-                      }
+                      if (checked) clearPhoto();
                     }}
                   />
                   <Label htmlFor="use-saved-tryon-photo" className="text-sm font-normal">
@@ -235,7 +229,7 @@ export default function TryOnPage() {
               </div>
             ) : (
               <>
-                <Input id="tryon-photo" type="file" accept="image/jpeg,image/png,image/webp" onChange={handlePhotoChange} />
+                <Input key={photoInputKey} id="tryon-photo" type="file" accept="image/jpeg,image/png,image/webp" onChange={handlePhotoChange} />
                 {previewUrl && (
                   <div className="flex items-center gap-3 rounded-md border p-3">
                     <div className="relative h-14 w-14 overflow-hidden rounded bg-muted">
@@ -276,8 +270,8 @@ export default function TryOnPage() {
         ) : tryOnsData?.items.length ? (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {tryOnsData.items.map((record) => {
-              const generated = resultImage(record);
-              const active = record.status === 'pending' || record.status === 'processing';
+              const generated = record.result_image_url;
+              const active = isTryOnActive(record);
               return (
                 <Card key={record.id} className="overflow-hidden">
                   <CardContent className="space-y-3 p-3">
@@ -313,7 +307,7 @@ export default function TryOnPage() {
                     </div>
 
                     {record.status === 'failed' && (
-                      <p className="text-sm text-destructive">{record.error || t('failed')}</p>
+                      <p className="break-words text-sm text-destructive">{record.error || t('failed')}</p>
                     )}
 
                     <div className="flex justify-end gap-2">

@@ -8,6 +8,7 @@ import {
   tryOnNeedsPolling,
   useCreateTryOn,
   useTryOns,
+  useUploadTryOnPhoto,
 } from '@/lib/hooks/use-tryon';
 
 function createWrapper(queryClient = new QueryClient({
@@ -104,5 +105,36 @@ describe('try-on hooks', () => {
     expect((request as RequestInit).body).toBeInstanceOf(FormData);
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['tryons'] });
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['tryon-quota'] });
+  });
+
+  it('saves a person photo and refreshes the profile before resolving', async () => {
+    vi.mocked(global.fetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ tryon_person_image_url: '/api/v1/images/person.jpg' }),
+    } as Response);
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    let profileRefreshed = false;
+    vi.spyOn(queryClient, 'invalidateQueries').mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      profileRefreshed = true;
+    });
+    const { result } = renderHook(() => useUploadTryOnPhoto(), {
+      wrapper: createWrapper(queryClient),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync(new File(['photo'], 'person.jpg', { type: 'image/jpeg' }));
+      expect(profileRefreshed).toBe(true);
+    });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      '/api/v1/users/me/tryon-photo',
+      expect.objectContaining({ method: 'POST', body: expect.any(FormData) }),
+    );
+    expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['user-profile'] });
   });
 });

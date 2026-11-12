@@ -61,8 +61,12 @@ export function buildTryOnFormData({ outfitId, photo, useSavedPhoto }: CreateTry
   return form;
 }
 
+export function isTryOnActive(record: Pick<TryOn, 'status'>): boolean {
+  return record.status === 'pending' || record.status === 'processing';
+}
+
 export function tryOnNeedsPolling(records: Array<Pick<TryOn, 'status'>>): boolean {
-  return records.some((record) => record.status === 'pending' || record.status === 'processing');
+  return records.some(isTryOnActive);
 }
 
 function useSetTokenIfAvailable() {
@@ -186,9 +190,8 @@ export function useUploadTryOnPhoto() {
         session?.accessToken || getAccessToken(),
       );
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['user-profile'] });
-    },
+    // Returned so mutateAsync resolves only once the profile carries the new photo.
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['user-profile'] }),
   });
 }
 
